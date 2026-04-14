@@ -1,0 +1,20 @@
+# Build artifacts
+dist-newstyle/
+build/
+target/
+node_modules/
+result
+
+# Nix
+.direnv/
+
+# LLM investigation notes
+.llm/
+
+# Circuit build artifacts
+circuits/build/
+
+# Editor
+*.swp
+*~
+.vscode/
