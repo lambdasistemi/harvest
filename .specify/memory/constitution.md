@@ -2,43 +2,49 @@
 
 ## Vision
 
-A loyalty coalition protocol on Cardano. Multiple businesses (supermarkets, shops, services) form a coalition. Each member issues voucher certificates to customers. Customers spend vouchers at any coalition member. One wallet, every loyalty program.
+A loyalty coalition protocol on Cardano. Multiple businesses form a coalition. Each member issues voucher certificates to customers. Customers spend vouchers at any coalition member. One wallet, every loyalty program.
+
+New members get instant foot traffic on day one — existing coalition users walk in and spend vouchers before the new member has issued a single certificate. Every redemption is a real sale. The coalition is the growth flywheel.
 
 ## Core Principles
 
 ### I. Coalition, Not Silos
 
-The protocol eliminates per-business loyalty silos. Any coalition member issues vouchers. Any coalition member accepts them. Users earn at one place, spend at another. The coalition is the product — not the individual issuer.
+The protocol eliminates per-business loyalty silos. Any coalition member issues vouchers. Any coalition member accepts them. Users earn at one place, spend at another. The coalition is the product — not the individual issuer. Joining the coalition means adding a verification key to the on-chain list. That is the only integration step.
 
-### II. User Device as State Store
+### II. User Has No Wallet
 
-The user's phone holds all private state: certificates, caps, randomness, proving keys. No server-side user databases. No accounts. The blockchain is the audit trail, the phone is the wallet. Issuers need only a signing key.
+The user has no Cardano wallet, no ADA, no signing keys. The user's phone holds certificates, private state (caps, running totals, randomness), and proving keys. When spending, the user generates a Groth16 proof on their phone and presents it to the supermarket. The supermarket submits the transaction using its own wallet. The user never interacts with the blockchain directly.
 
-### III. Privacy by Default
+### III. Smart Contract as Trust Layer
+
+Coalition members do not verify each other's certificates. The on-chain validator does. A fake certificate produces an invalid Groth16 proof. The transaction fails. Nobody loses anything. The smart contract is the only trust relationship — no APIs, no shared databases, no inter-member communication needed.
+
+### IV. Privacy by Default
 
 User balances and voucher caps are never revealed on-chain. All on-chain data is commitments (Poseidon hashes) or zero-knowledge proofs. Only the spend amount per transaction is public. The issuer who tops up a user's cap knows that cap (they signed it), but on-chain observers learn nothing about balances.
 
-### IV. Proof Soundness
+### V. Proof Soundness
 
-No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. The circuit is the source of truth for valid state transitions. The on-chain validator rejects anything the circuit would not prove.
+No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, and commitment binding. No second proof system (BBS+) is needed — the signature check is embedded in the circuit.
 
-### V. Centralized Spending, Distributed Issuance
+### VI. Monotonic State
 
-Many issuers, one shared spending validator. Each issuer independently issues certificates using their own signing key and trusted setup. Spending happens at any coalition member against the shared on-chain state. The on-chain validator holds the list of accepted issuer verification keys.
+Cap only grows (rewards). Spent only grows (redemptions). The invariant is always: spent <= cap. The gap is the user's available balance, known only to the user's phone. A new certificate always supersedes the old one with a higher cap. There is no revocation.
 
-### VI. On-Chain State: Nested Trie
+### VII. Earn and Spend in One Interaction
+
+At checkout, the user can both spend existing vouchers and earn new ones in a single interaction. Spending is on-chain (Groth16 proof submitted by the supermarket). Earning is off-chain (supermarket signs a new certificate with a higher cap). The user walks away with an updated on-chain committed counter and a new certificate.
+
+### VIII. On-Chain State: Nested Trie
 
 The shared state is a Merkle Patricia Trie of tries: issuer -> user -> committed spend counter. A spend transaction updates one or more leaves, each with its own Groth16 proof. The trie root sits in a single coalition UTXO.
 
-### VII. Cap Update Protocol
+### IX. Correct Before Optimized
 
-When an issuer tops up a user's voucher, the user presents their existing certificate (signed by the issuer). The issuer verifies its own signature, reads the current cap, adds the bonus, and issues a new certificate. This is off-chain — no on-chain transaction needed for issuance.
+Start simple, prove correctness, then optimize. One UTXO per user before the trie. Single-issuer spends before multi-issuer. snarkjs before native prover. Every step end-to-end testable before the next.
 
-### VIII. Correct Before Optimized
-
-Start simple, prove correctness, then optimize. One UTXO per user before the trie. Single-issuer spends before multi-issuer. snarkjs before native prover. cardano-cli before programmatic submission. Every step end-to-end testable before the next.
-
-### IX. Nix-First
+### X. Nix-First
 
 All dependencies, builds, and CI are Nix-managed. The flake produces all derivations. No global installs, no version drift.
 
@@ -60,6 +66,6 @@ All dependencies, builds, and CI are Nix-managed. The flake produces all derivat
 
 ## Governance
 
-This constitution supersedes all other practices. Privacy guarantees (Principle III) and proof soundness (Principle IV) cannot be weakened. The coalition model (Principle I) is the project's reason for existence.
+This constitution supersedes all other practices. Privacy guarantees (Principle IV) and proof soundness (Principle V) cannot be weakened. The coalition model (Principle I) is the project's reason for existence.
 
-**Version**: 2.0.0 | **Ratified**: 2026-04-14
+**Version**: 3.0.0 | **Ratified**: 2026-04-14
