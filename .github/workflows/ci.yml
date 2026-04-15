@@ -27,6 +27,7 @@ jobs:
           .#checks.x86_64-linux.unit-tests
           .#checks.x86_64-linux.groth16-ffi
           .#checks.x86_64-linux.circuit
+          .#checks.x86_64-linux.circuit-tests
           .#checks.x86_64-linux.lint
           .#checks.x86_64-linux.aiken-check
 

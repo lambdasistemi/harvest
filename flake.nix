@@ -66,6 +66,77 @@
           '';
         };
 
+        # Circuit tests (EdDSA roundtrip + Jubjub validation)
+        circuit-tests = pkgs.buildNpmPackage {
+          pname = "voucher-circuit-tests";
+          version = "0.1.0";
+          src = ./circuits;
+          npmDepsHash = "sha256-v8I21zLu1cRK3U0j6Ge3MpjxvX473BCishCX+meHPTI=";
+          nativeBuildInputs = [ pkgs.circom ];
+          dontNpmBuild = true;
+          buildPhase = ''
+            mkdir -p build
+
+            # Compile main circuit
+            circom voucher_spend.circom --prime bls12381 --r1cs --wasm --sym -l node_modules -o build/
+
+            # Compile EdDSA test circuit
+            cat > build/test_eddsa_jubjub.circom << 'CIRCOM'
+            pragma circom 2.1.0;
+            include "../lib/eddsa_jubjub.circom";
+            template TestEdDSA() {
+                signal input enabled;
+                signal input Ax;
+                signal input Ay;
+                signal input S;
+                signal input R8x;
+                signal input R8y;
+                signal input M;
+                component v = EdDSAJubjubVerifier();
+                v.enabled <== enabled;
+                v.Ax <== Ax;
+                v.Ay <== Ay;
+                v.S <== S;
+                v.R8x <== R8x;
+                v.R8y <== R8y;
+                v.M <== M;
+            }
+            component main = TestEdDSA();
+            CIRCOM
+            circom build/test_eddsa_jubjub.circom --prime bls12381 --r1cs --wasm -l node_modules -o build/
+
+            # Compile Poseidon helper circuits
+            for n in 1 2 3 5; do
+              name="hash''${n}_helper"
+              signals=""
+              assigns=""
+              for i in $(seq 0 $((n-1))); do
+                signals="$signals    signal input v$i;"$'\n'
+                assigns="$assigns    h.inputs[$i] <== v$i;"$'\n'
+              done
+              cat > "build/$name.circom" << EOF
+            pragma circom 2.1.0;
+            include "circomlib/circuits/poseidon.circom";
+            template HashN() {
+            $signals    signal output out;
+                component h = Poseidon($n);
+            $assigns    out <== h.out;
+            }
+            component main = HashN();
+            EOF
+              circom "build/$name.circom" --prime bls12381 --wasm -l node_modules -o build/
+            done
+
+            # Run tests
+            node test_eddsa_roundtrip.js
+            node test_jubjub_validation.js
+          '';
+          installPhase = ''
+            mkdir -p $out
+            echo "All circuit tests passed" > $out/result.txt
+          '';
+        };
+
         # Aiken check
         aiken-check = pkgs.writeShellApplication {
           name = "aiken-check";
@@ -90,7 +161,7 @@
         };
 
         checks = hsChecks // {
-          inherit groth16-ffi circuit aiken-check;
+          inherit groth16-ffi circuit circuit-tests aiken-check;
         };
 
         apps = import ./nix/apps.nix {
