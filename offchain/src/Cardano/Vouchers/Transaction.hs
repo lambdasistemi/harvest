@@ -3,10 +3,11 @@ module Cardano.Vouchers.Transaction (
     spendVoucher
 ) where
 
-import Cardano.Ledger.Api (Addr, Coin, Script)
-import Cardano.Ledger.Api.Era (ConwayEra)
-import Cardano.Ledger.Api.Tx (TxIn)
-import Cardano.Ledger.Mary.Value (MaryValue, inject)
+import Cardano.Ledger.Address (Addr)
+import Cardano.Ledger.Conway (ConwayEra)
+import Cardano.Ledger.Conway.Scripts (AlonzoScript)
+import Cardano.Ledger.Mary.Value (MaryValue)
+import Cardano.Ledger.TxIn (TxIn)
 import Cardano.Node.Client.TxBuild (
     TxBuild
     , attachScript
@@ -40,11 +41,11 @@ spendVoucher
     -- ^ User's UTXO (script-locked with VoucherDatum)
     -> TxIn
     -- ^ Supermarket's collateral UTXO
-    -> Script ConwayEra
+    -> AlonzoScript ConwayEra
     -- ^ The voucher_spend validator script
     -> Addr
     -- ^ Script address (where the output goes back)
-    -> Coin
+    -> MaryValue
     -- ^ Value locked in the UTXO (passed through)
     -> Integer
     -- ^ user_id (Poseidon hash of user_secret)
@@ -91,7 +92,7 @@ spendVoucher
         outIdx <-
             payTo'
                 scriptAddr
-                (inject lockedValue)
+                lockedValue
                 VoucherDatum
                     { vdUserId = userId
                     , vdCommitSpent = commitNew
