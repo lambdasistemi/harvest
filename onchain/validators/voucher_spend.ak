@@ -6,11 +6,13 @@ use voucher/types.{SpendRedeemer, VerificationKey, VoucherDatum}
 
 /// Voucher spend validator.
 ///
-/// Users spend from a supermarket-issued voucher by proving in zero knowledge
-/// that their cumulative spend does not exceed their (hidden) cap.
+/// Verifies a Groth16 proof that:
+///   1. The user knows a secret matching user_id
+///   2. The user holds a valid certificate (cert_hash) for this user_id
+///   3. The spend amount d plus the old counter doesn't exceed the cap
+///   4. The committed counters are correctly computed
 ///
-/// The verification key is a parameter baked into the validator.
-/// Each user has their own UTXO with a committed spend counter.
+/// The supermarket submits the transaction — the user has no wallet.
 validator voucher_spend(vk: VerificationKey) {
   spend(
     datum: Option<VoucherDatum>,
@@ -20,21 +22,25 @@ validator voucher_spend(vk: VerificationKey) {
   ) {
     expect Some(voucher) = datum
 
-    // The user must sign the transaction
-    let signed = list_has(self.extra_signatories, voucher.user_pk)
-
-    // Public inputs match the circuit: [d, commit_S_old, commit_S_new]
+    // Public inputs match the circuit:
+    //   [d, commit_S_old, commit_S_new, cert_hash, user_id]
     let public_inputs =
-      [redeemer.d, voucher.commit_spent, redeemer.commit_spent_new]
+      [
+        redeemer.d,
+        voucher.commit_spent,
+        redeemer.commit_spent_new,
+        redeemer.cert_hash,
+        voucher.user_id,
+      ]
 
     // Verify the Groth16 proof
     let proof_valid = groth16.verify(vk, redeemer.proof, public_inputs)
 
     // Check that the output UTXO has the updated commitment
     let output_valid =
-      check_output(self, own_ref, voucher.user_pk, redeemer.commit_spent_new)
+      check_output(self, own_ref, voucher.user_id, redeemer.commit_spent_new)
 
-    signed && proof_valid && output_valid
+    proof_valid && output_valid
   }
 
   else(_ctx: ScriptContext) {
@@ -46,7 +52,7 @@ validator voucher_spend(vk: VerificationKey) {
 fn check_output(
   tx: Transaction,
   own_ref: OutputReference,
-  user_pk: ByteArray,
+  user_id: Int,
   new_commit: Int,
 ) -> Bool {
   expect Some(own_input) =
@@ -59,19 +65,7 @@ fn check_output(
 
   expect InlineDatum(raw_datum) = output.datum
   expect datum: VoucherDatum = raw_datum
-  datum.user_pk == user_pk && datum.commit_spent == new_commit
-}
-
-fn list_has(list: List<ByteArray>, item: ByteArray) -> Bool {
-  when list is {
-    [] -> False
-    [head, ..tail] ->
-      if head == item {
-        True
-      } else {
-        list_has(tail, item)
-      }
-  }
+  datum.user_id == user_id && datum.commit_spent == new_commit
 }
 
 fn find_input(

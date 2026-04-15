@@ -16,15 +16,15 @@ pub type VerificationKey {
   beta_g2: ByteArray,
   gamma_g2: ByteArray,
   delta_g2: ByteArray,
-  /// One per public input + 1
+  /// One per public input + 1 (6 for our circuit: ic[0..5])
   ic: List<ByteArray>,
 }
 
-/// On-chain state per user: their public key and committed spend counter.
+/// On-chain state per user.
 pub type VoucherDatum {
-  /// User's public key (must sign spend transactions)
-  user_pk: ByteArray,
-  /// Poseidon commitment to the running spend total (single field element).
+  /// User identity: Poseidon(user_secret)
+  user_id: Int,
+  /// Poseidon commitment to the running spend total.
   commit_spent: Int,
 }
 
@@ -34,6 +34,8 @@ pub type SpendRedeemer {
   d: Int,
   /// New Poseidon commitment to updated counter
   commit_spent_new: Int,
+  /// Certificate hash (published by issuer, Poseidon(user_id, cap, nonce))
+  cert_hash: Int,
   /// Groth16 proof that the spend is valid
   proof: Groth16Proof,
 }

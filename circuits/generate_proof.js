@@ -5,7 +5,7 @@ async function main() {
   const zkey = "build/voucher_spend.zkey";
 
   // Load parameters from file or use defaults
-  let S_old, d, S_new, C, r_old, r_new;
+  let S_old, d, S_new, C, r_old, r_new, user_secret, cert_nonce;
   const paramFile = process.argv[2];
   if (paramFile) {
     const params = JSON.parse(fs.readFileSync(paramFile, "utf8"));
@@ -15,74 +15,56 @@ async function main() {
     C = BigInt(params.C);
     r_old = BigInt(params.r_old);
     r_new = BigInt(params.r_new);
+    user_secret = BigInt(params.user_secret);
+    cert_nonce = BigInt(params.cert_nonce);
   } else {
-    // Default test case: cap=100, spent 25 so far, spending 10 more
+    // Default test case
     S_old = 25n;
     d = 10n;
     S_new = S_old + d;
     C = 100n;
     r_old = 12345678n;
     r_new = 87654321n;
+    user_secret = 42n;
+    cert_nonce = 999n;
   }
-
-  // The Poseidon hash in the circuit uses BLS12-381's scalar field.
-  // circomlibjs hardcodes BN128 constants, so we can't use it directly.
-  //
-  // Instead, we use a helper circuit to compute commitments.
-  // Or: we use snarkjs witness calculator which operates in the correct field.
-  //
-  // Strategy: create a helper circuit that outputs the Poseidon hash,
-  // generate its witness, and extract the output.
-  //
-  // Simpler approach: use the main circuit's witness calculator.
-  // The witness calculator will compute Poseidon internally and we can
-  // extract the signal values from the witness.
-  //
-  // Even simpler: use snarkjs's wtns export json to read computed signals.
-
-  // Step 1: Generate witness with inputs where commit values are 0 (will fail
-  // constraint check but we can use --no-check to get intermediate values).
-  // Actually, witness calculators don't have --no-check.
-  //
-  // Real solution: write a separate "commitment computer" circuit.
-
-  const helperCircom = `
-pragma circom 2.1.0;
-include "circomlib/circuits/poseidon.circom";
-template CommitCompute() {
-    signal input v;
-    signal input r;
-    signal output out;
-    component h = Poseidon(2);
-    h.inputs[0] <== v;
-    h.inputs[1] <== r;
-    out <== h.out;
-}
-component main = CommitCompute();
-`;
-
-  fs.writeFileSync("build/commit_helper.circom", helperCircom);
 
   const { execSync } = require("child_process");
 
-  // Compile helper
-  execSync("circom build/commit_helper.circom --prime bls12381 --wasm -l node_modules -o build/", { stdio: "pipe" });
+  // Compile Poseidon helper circuits for BLS12-381 field (individual signal names)
+  for (const [name, n] of [["hash1_helper", 1], ["hash2_helper", 2], ["hash3_helper", 3]]) {
+    if (!fs.existsSync(`build/${name}_js/${name}.wasm`)) {
+      const signals = Array.from({length: n}, (_, i) => `    signal input v${i};`).join("\n");
+      const assigns = Array.from({length: n}, (_, i) => `    h.inputs[${i}] <== v${i};`).join("\n");
+      const src = `pragma circom 2.1.0;\ninclude "circomlib/circuits/poseidon.circom";\ntemplate HashN() {\n${signals}\n    signal output out;\n    component h = Poseidon(${n});\n${assigns}\n    out <== h.out;\n}\ncomponent main = HashN();\n`;
+      fs.writeFileSync(`build/${name}.circom`, src);
+      execSync(`circom build/${name}.circom --prime bls12381 --wasm -l node_modules -o build/`, { stdio: "pipe" });
+    }
+  }
 
-  // Compute commit_S_old
-  const wcOld = require("./build/commit_helper_js/witness_calculator.js");
-  const wasmHelper = fs.readFileSync("build/commit_helper_js/commit_helper.wasm");
-  const calcOld = await wcOld(wasmHelper);
-  const wtnsOld = await calcOld.calculateWitness({ v: S_old.toString(), r: r_old.toString() }, 0);
-  const commit_old = wtnsOld[1].toString(); // output signal is at index 1
+  // Compute Poseidon hash using the helper circuit's witness calculator
+  async function poseidonHash(inputs, helperName) {
+    const wasmBuf = fs.readFileSync(`build/${helperName}_js/${helperName}.wasm`);
+    const wcPath = `./build/${helperName}_js/witness_calculator.js`;
+    delete require.cache[require.resolve(wcPath)];
+    const wc = require(wcPath);
+    const calc = await wc(wasmBuf);
+    const vals = {};
+    for (let i = 0; i < inputs.length; i++) {
+      vals[`v${i}`] = inputs[i].toString();
+    }
+    const witness = await calc.calculateWitness(vals, 0);
+    return witness[1].toString();
+  }
 
-  // Compute commit_S_new
-  // Need fresh calculator instance
-  delete require.cache[require.resolve("./build/commit_helper_js/witness_calculator.js")];
-  const wcNew = require("./build/commit_helper_js/witness_calculator.js");
-  const calcNew = await wcNew(wasmHelper);
-  const wtnsNew = await calcNew.calculateWitness({ v: S_new.toString(), r: r_new.toString() }, 0);
-  const commit_new = wtnsNew[1].toString();
+  // Compute all derived values
+  const user_id = await poseidonHash([user_secret], "hash1_helper");
+  const cert_hash = await poseidonHash([BigInt(user_id), C, cert_nonce], "hash3_helper");
+  const commit_old = await poseidonHash([S_old, r_old], "hash2_helper");
+  const commit_new = await poseidonHash([S_new, r_new], "hash2_helper");
 
+  console.log("user_id:", user_id);
+  console.log("cert_hash:", cert_hash);
   console.log("commit_S_old:", commit_old);
   console.log("commit_S_new:", commit_new);
 
@@ -90,16 +72,20 @@ component main = CommitCompute();
     d: d.toString(),
     commit_S_old: commit_old,
     commit_S_new: commit_new,
+    cert_hash: cert_hash,
+    user_id: user_id,
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),
     r_old: r_old.toString(),
     r_new: r_new.toString(),
+    user_secret: user_secret.toString(),
+    cert_nonce: cert_nonce.toString(),
   };
 
   fs.writeFileSync("build/input.json", JSON.stringify(input));
 
-  // Generate witness for main circuit
+  // Generate witness
   const wasmMain = fs.readFileSync("build/voucher_spend_js/voucher_spend.wasm");
   const wcMain = require("./build/voucher_spend_js/witness_calculator.js");
   const calcMain = await wcMain(wasmMain);
