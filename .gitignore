@@ -18,3 +18,5 @@ circuits/build/
 *.swp
 *~
 .vscode/
+result
+result-*
