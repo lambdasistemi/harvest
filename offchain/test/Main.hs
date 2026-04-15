@@ -5,4 +5,4 @@ import Test.Hspec
 
 main :: IO ()
 main = hspec $ do
-  Groth16Spec.spec
+    Groth16Spec.spec
