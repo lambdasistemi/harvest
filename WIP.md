@@ -44,7 +44,7 @@ The circuit proves all of the following in a single Groth16 proof:
 - Proof round-trip verified: `node generate_proof.js` → "Verification: VALID"
 - Trusted setup with contribution produces non-trivial IC points
 
-**Limitation**: Certificate authentication currently uses a Poseidon commitment scheme (`cert_hash`), not a digital signature. This requires publishing each `cert_hash` on-chain — one transaction per certificate issuance. This violates the constitution's principle that transactions happen only on spending. See "Jubjub EdDSA" section below.
+**Limitation**: Certificate authentication currently uses a Poseidon commitment scheme (`cert_hash`), not a digital signature. This requires publishing each `cert_hash` on-chain — one transaction per certificate issuance. This violates the constitution's principle that transactions happen only on spending. The Jubjub EdDSA port is now working (see below) and can replace `cert_hash` with off-chain signed certificates.
 
 ### On-Chain Validator (Aiken, Plutus V3)
 
@@ -153,15 +153,18 @@ All parameters mathematically verified (generator on curve, Base8 * subgroup_ord
 - `eddsa_jubjub.circom` — EdDSA-Poseidon verifier with Jubjub Base8 and subgroup order
 - `jubjub_eddsa.js` — off-chain signing (keygen, sign with Poseidon hash)
 
-**Current status**: Templates compile (7383 constraints). JS signing generates valid keypairs and signatures. Circuit witness generation fails at the final equality check (`S*Base8 != R8 + h*8*A`).
+**Current status**: WORKING. Templates compile (7132 constraints). Circuit witness generation passes for all tested messages.
 
-**Suspected cause**: The `EscalarMulFix` template uses window-based multiplication with precomputed tables. These tables are generated at compile time using the curve's addition law. If the Montgomery conversion or the window table generation interacts incorrectly with the BLS12-381 field (e.g., intermediate values wrapping differently), the multiplication produces wrong results. Also, `Num2Bits_strict` was patched from 254 to 255 bits — any template that assumes 254-bit field elements may have subtle issues.
+**Root cause of previous failure**: The JS keygen was using `Base8` (subgroup generator) instead of `Gen` (a different subgroup point where `Base8 = 8*Gen`). The circuit follows circomlib's cofactor-clearing design (`8*A`), which assumes `A = sk*Gen` so that `8*A = sk*Base8`. With `A = sk*Base8`, the equation's right side was 8x too large.
 
-**What needs debugging**:
-1. Verify `EscalarMulFix` output against JS `edwardsMul` for the same scalar and base point
-2. Verify Edwards↔Montgomery conversion produces correct intermediate values
-3. Check if any circomlib template has other hardcoded 254-bit assumptions beyond `Num2Bits_strict`
-4. Test individual components (JubjubFullAdd, MontgomeryAdd) against Python/JS reference
+**Secondary fix**: `escalarmulany_jubjub.circom` had Baby Jubjub's BASE8 (BN128 point) hardcoded as the zero-point fallback — replaced with Jubjub's BASE8.
+
+**Note on Gen**: Gen is actually a subgroup generator (not a full-curve generator with order 8*ORDER). The EdDSA equation holds regardless since both Gen and Base8 are in the prime-order subgroup. The `8*A` step is a redundant scaling within the subgroup, not true cofactor clearing, but the math is correct.
+
+**Validation** (`test_jubjub_validation.js`, 31/31 pass):
+- Curve constants (on-curve, generator order, Base8 = 8*Gen)
+- EdDSA equation verified algebraically in JS for 5 message values
+- Circuit witness generation verified for 5 signatures
 
 ### Alternative: Halo2
 
@@ -398,13 +401,11 @@ cardano-vouchers/
 - Batch cert_hashes into a Merkle tree, publish one root — reduces to one tx per batch, but still requires on-chain writes for issuance
 - Pre-publish a large tree of unused cert_hashes — wasteful, doesn't scale
 
-**Real fix**: Get Jubjub EdDSA working in the circuit (or switch to Halo2). Then the issuer signs certificates off-chain with their private key, and the circuit verifies the signature. No on-chain write needed for issuance.
+**Real fix**: Jubjub EdDSA is now working. Integrate it into `voucher_spend.circom` to replace `cert_hash` with signature verification.
 
 ## Next Steps (Priority Order)
 
-
-
-1. **Fix Jubjub EdDSA** — debug the scalar multiplication mismatch. Without this, certificate authentication requires on-chain writes per issuance.
+1. **Integrate EdDSA into voucher_spend circuit** — replace `cert_hash` commitment with Jubjub EdDSA signature verification. The issuer signs certificates off-chain, the circuit verifies the signature. No on-chain write needed for issuance.
 2. **External Groth16 test vectors** — validate the Aiken verifier against ak-381 and plutus-groth test data.
 3. **Wire nix test execution** — make `checks.unit-tests` run tests in the sandbox with circuit artifacts.
 4. **Transaction construction** — integrate cardano-node-clients for building and submitting spend transactions.
