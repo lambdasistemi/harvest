@@ -1,0 +1,4 @@
+packages: .
+
+-- We rely on groth16_ffi (Rust C FFI) being on LD_LIBRARY_PATH.
+-- In nix, the flake wires this via extra-lib-dirs.

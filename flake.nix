@@ -1,16 +1,26 @@
 {
   description = "ZK voucher system for Cardano using Groth16 proofs";
 
+  nixConfig = {
+    extra-substituters = [ "https://cache.iog.io" ];
+    extra-trusted-public-keys =
+      [ "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=" ];
+  };
+
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    haskellNix.url = "github:input-output-hk/haskell.nix";
+    nixpkgs.follows = "haskellNix/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     aiken.url = "github:aiken-lang/aiken";
   };
 
-  outputs = { self, nixpkgs, flake-utils, aiken }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken }:
+    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          overlays = [ haskellNix.overlay ];
+          inherit system;
+        };
         aikenPkg = aiken.packages.${system}.aiken or null;
 
         # Rust FFI: BLS12-381 point compression via blst
@@ -21,21 +31,9 @@
           cargoLock.lockFile = ./offchain/cbits/groth16-ffi/Cargo.lock;
         };
 
-        # Haskell: off-chain library + tests
-        haskellPkgs = pkgs.haskellPackages.override {
-          overrides = hself: hsuper: {
-            cardano-vouchers = hself.callCabal2nix "cardano-vouchers" ./offchain {
-              groth16_ffi = null;
-            };
-          };
-        };
-
-        cardano-vouchers-lib = haskellPkgs.cardano-vouchers.overrideAttrs (old: {
-          buildInputs = (old.buildInputs or []) ++ [ groth16-ffi ];
-          configureFlags = (old.configureFlags or []) ++ [
-            "--extra-lib-dirs=${groth16-ffi}/lib"
-          ];
-        });
+        # Haskell project via haskell.nix
+        project = import ./nix/project.nix { inherit pkgs groth16-ffi; };
+        components = project.hsPkgs.cardano-vouchers.components;
 
         # Circuit compilation (Circom → R1CS + WASM)
         circuit = pkgs.buildNpmPackage {
@@ -55,18 +53,6 @@
           '';
         };
 
-        # Lint check
-        lint = pkgs.writeShellApplication {
-          name = "lint";
-          runtimeInputs = with pkgs; [ fourmolu hlint ];
-          excludeShellChecks = [ "SC2046" "SC2086" ];
-          text = ''
-            cd "${./offchain}"
-            fourmolu -m check $(find src test -name '*.hs')
-            hlint src test
-          '';
-        };
-
         # Aiken check
         aiken-check = pkgs.writeShellApplication {
           name = "aiken-check";
@@ -78,6 +64,11 @@
           '';
         };
 
+        # Haskell checks
+        hsChecks = import ./nix/checks.nix {
+          inherit pkgs components groth16-ffi;
+        };
+
       in
       {
         packages = {
@@ -85,53 +76,18 @@
           inherit groth16-ffi circuit;
         };
 
-        checks = {
-          inherit groth16-ffi circuit lint aiken-check;
+        checks = hsChecks // {
+          inherit groth16-ffi circuit aiken-check;
         };
 
-        apps = {
-          lint = {
-            type = "app";
-            program = pkgs.lib.getExe lint;
-          };
-          aiken-check = {
-            type = "app";
-            program = pkgs.lib.getExe aiken-check;
-          };
+        apps = import ./nix/apps.nix {
+          inherit pkgs;
+          checks = hsChecks;
         };
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            # Haskell
-            ghc
-            cabal-install
-            haskell-language-server
-            fourmolu
-            hlint
-
-            # Rust (for blst FFI)
-            cargo
-            rustc
-            rustfmt
-            just
-
-            # ZK circuits (Groth16)
-            circom
-            nodejs
-
-            # Aiken
-          ] ++ pkgs.lib.optionals (aikenPkg != null) [ aikenPkg ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.darwin.apple_sdk.frameworks.Security
-              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-            ];
-
-          shellHook = ''
-            echo "cardano-vouchers dev shell"
-            echo "  ghc:    $(ghc --version)"
-            echo "  cabal:  $(cabal --version | head -1)"
-            echo "  cargo:  $(cargo --version)"
-          '';
+        devShells.default = project.shell // {
+          buildInputs = (project.shell.buildInputs or [])
+            ++ pkgs.lib.optionals (aikenPkg != null) [ aikenPkg ];
         };
       });
 }

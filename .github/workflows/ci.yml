@@ -20,11 +20,18 @@ jobs:
         with:
           name: paolino
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Build all
-        run: nix develop --quiet -c just build
+      - name: Build all derivations
+        run: >-
+          nix build --quiet --no-link
+          .#checks.x86_64-linux.library
+          .#checks.x86_64-linux.unit-tests
+          .#checks.x86_64-linux.groth16-ffi
+          .#checks.x86_64-linux.circuit
+          .#checks.x86_64-linux.lint
+          .#checks.x86_64-linux.aiken-check
 
-  test:
-    name: Test
+  lint:
+    name: Lint
     needs: build-gate
     runs-on: nixos
     steps:
@@ -33,39 +40,5 @@ jobs:
         with:
           name: paolino
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Compile circuit
-        run: nix develop --quiet -c just circuit
-      - name: Run trusted setup
-        run: nix develop --quiet -c just setup
-      - name: Generate test proof
-        run: nix develop --quiet -c just prove
-      - name: Run off-chain tests
-        run: nix develop --quiet -c just test-offchain
-      - name: Run on-chain tests
-        run: nix develop --quiet -c just test-onchain
-
-  formatting:
-    name: Format Check
-    needs: build-gate
-    runs-on: nixos
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/cachix-action@v15
-        with:
-          name: paolino
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Check formatting
-        run: nix develop --quiet -c just format-check
-
-  hlint:
-    name: HLint
-    needs: build-gate
-    runs-on: nixos
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/cachix-action@v15
-        with:
-          name: paolino
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Run HLint
-        run: nix develop --quiet -c just hlint
+      - name: Fourmolu + HLint
+        run: nix run .#lint --quiet
