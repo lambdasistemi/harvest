@@ -44,7 +44,7 @@ spec = describe "Groth16" $ do
         BS.length (cvBeta cvk) `shouldBe` 96
         BS.length (cvGamma cvk) `shouldBe` 96
         BS.length (cvDelta cvk) `shouldBe` 96
-        length (cvIC cvk) `shouldBe` 4
+        length (cvIC cvk) `shouldBe` 7
         all (\bs -> BS.length bs == 48) (cvIC cvk) `shouldBe` True
 
     it "encodes proof as PlutusData CBOR round-trip" $ do
@@ -67,15 +67,17 @@ spec = describe "Groth16" $ do
         proof <- loadProof
         cp <- compressProof proof
         let commitNew = 28195311164484447918780156773062160077584542861722122307398165012434720062639
-            pd = spendRedeemerToData 10 commitNew cp
+            issuerAx = 4704846161580081468346911840983759671196780515436681519191612393768338608159
+            issuerAy = 34214411966183820933157791953903973357923378516047256783976067400851897240999
+            pd = spendRedeemerToData 10 commitNew issuerAx issuerAy cp
             cbor = encodePlutusData pd
             decoded = decodePlutusData cbor
         decoded `shouldBe` Right pd
 
     it "encodes voucher datum as PlutusData CBOR round-trip" $ do
-        let userPk = BS.replicate 28 0x42
+        let userId = 16194551325045813456199696102638278711129957240995407309199208567862169768429
             commitSpent = 15582956213402723687926053625819952146889630636005756883548712100509189278757
-            pd = voucherDatumToData userPk commitSpent
+            pd = voucherDatumToData userId commitSpent
             cbor = encodePlutusData pd
             decoded = decodePlutusData cbor
         decoded `shouldBe` Right pd

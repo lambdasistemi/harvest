@@ -2,6 +2,7 @@ pragma circom 2.1.0;
 
 include "circomlib/circuits/comparators.circom";
 include "circomlib/circuits/poseidon.circom";
+include "lib/eddsa_jubjub.circom";
 
 /// Voucher spend circuit.
 ///
@@ -9,10 +10,9 @@ include "circomlib/circuits/poseidon.circom";
 /// updating their committed counter from S_old to S_new, without revealing
 /// the cap or the running total.
 ///
-/// Certificate authentication: the issuer creates a certificate hash
-///   cert_hash = Poseidon(user_id, cap, nonce)
-/// and publishes cert_hash on-chain. The user proves knowledge of the
-/// preimage, binding the spend to a legitimate certificate.
+/// Certificate authentication: the issuer signs (user_id, cap) with EdDSA
+/// on the Jubjub curve. The circuit verifies the signature, binding the
+/// spend to a legitimate certificate. No on-chain write needed for issuance.
 ///
 /// User identity: user_id = Poseidon(user_secret). The user proves
 /// knowledge of user_secret, binding the spend to a specific user.
@@ -21,8 +21,9 @@ include "circomlib/circuits/poseidon.circom";
 ///   - d             : spend amount
 ///   - commit_S_old  : Poseidon commitment to old counter
 ///   - commit_S_new  : Poseidon commitment to new counter
-///   - cert_hash     : certificate hash (published by issuer)
 ///   - user_id       : Poseidon(user_secret), matches on-chain entry
+///   - issuer_Ax     : issuer's EdDSA public key (x coordinate)
+///   - issuer_Ay     : issuer's EdDSA public key (y coordinate)
 ///
 /// Private inputs (only the user knows):
 ///   - S_old         : old running total of spent tokens
@@ -31,15 +32,18 @@ include "circomlib/circuits/poseidon.circom";
 ///   - r_old         : randomness for old commitment
 ///   - r_new         : randomness for new commitment
 ///   - user_secret   : user's secret (proves identity)
-///   - cert_nonce    : issuer's nonce for this certificate
+///   - sig_R8x       : EdDSA signature R8 point (x coordinate)
+///   - sig_R8y       : EdDSA signature R8 point (y coordinate)
+///   - sig_S         : EdDSA signature scalar
 
 template VoucherSpend(nBits) {
     // --- public inputs ---
     signal input d;
     signal input commit_S_old;
     signal input commit_S_new;
-    signal input cert_hash;
     signal input user_id;
+    signal input issuer_Ax;
+    signal input issuer_Ay;
 
     // --- private inputs ---
     signal input S_old;
@@ -48,36 +52,46 @@ template VoucherSpend(nBits) {
     signal input r_old;
     signal input r_new;
     signal input user_secret;
-    signal input cert_nonce;
+    signal input sig_R8x;
+    signal input sig_R8y;
+    signal input sig_S;
 
     // 1. User identity: user_id == Poseidon(user_secret)
     component hashUser = Poseidon(1);
     hashUser.inputs[0] <== user_secret;
     user_id === hashUser.out;
 
-    // 2. Certificate authenticity: cert_hash == Poseidon(user_id, C, cert_nonce)
-    component hashCert = Poseidon(3);
-    hashCert.inputs[0] <== user_id;
-    hashCert.inputs[1] <== C;
-    hashCert.inputs[2] <== cert_nonce;
-    cert_hash === hashCert.out;
+    // 2. Certificate message: M = Poseidon(user_id, C)
+    component hashMsg = Poseidon(2);
+    hashMsg.inputs[0] <== user_id;
+    hashMsg.inputs[1] <== C;
 
-    // 3. Counter increment: S_new = S_old + d
+    // 3. EdDSA signature verification (issuer signed the certificate)
+    component eddsa = EdDSAJubjubVerifier();
+    eddsa.enabled <== 1;
+    eddsa.Ax <== issuer_Ax;
+    eddsa.Ay <== issuer_Ay;
+    eddsa.S <== sig_S;
+    eddsa.R8x <== sig_R8x;
+    eddsa.R8y <== sig_R8y;
+    eddsa.M <== hashMsg.out;
+
+    // 4. Counter increment: S_new = S_old + d
     S_new === S_old + d;
 
-    // 4. No overspend: S_new <= C
+    // 5. No overspend: S_new <= C
     component rangeCheck = LessEqThan(nBits);
     rangeCheck.in[0] <== S_new;
     rangeCheck.in[1] <== C;
     rangeCheck.out === 1;
 
-    // 5. Old commitment matches: Poseidon(S_old, r_old)
+    // 6. Old commitment matches: Poseidon(S_old, r_old)
     component hashOld = Poseidon(2);
     hashOld.inputs[0] <== S_old;
     hashOld.inputs[1] <== r_old;
     commit_S_old === hashOld.out;
 
-    // 6. New commitment matches: Poseidon(S_new, r_new)
+    // 7. New commitment matches: Poseidon(S_new, r_new)
     component hashNew = Poseidon(2);
     hashNew.inputs[0] <== S_new;
     hashNew.inputs[1] <== r_new;
@@ -85,4 +99,4 @@ template VoucherSpend(nBits) {
 }
 
 // 32-bit range: caps up to ~4 billion tokens
-component main {public [d, commit_S_old, commit_S_new, cert_hash, user_id]} = VoucherSpend(32);
+component main {public [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay]} = VoucherSpend(32);

@@ -16,7 +16,7 @@ pub type VerificationKey {
   beta_g2: ByteArray,
   gamma_g2: ByteArray,
   delta_g2: ByteArray,
-  /// One per public input + 1 (6 for our circuit: ic[0..5])
+  /// One per public input + 1 (7 for our circuit: ic[0..6])
   ic: List<ByteArray>,
 }
 
@@ -34,8 +34,10 @@ pub type SpendRedeemer {
   d: Int,
   /// New Poseidon commitment to updated counter
   commit_spent_new: Int,
-  /// Certificate hash (published by issuer, Poseidon(user_id, cap, nonce))
-  cert_hash: Int,
+  /// Issuer's EdDSA public key (x coordinate, Jubjub curve)
+  issuer_ax: Int,
+  /// Issuer's EdDSA public key (y coordinate, Jubjub curve)
+  issuer_ay: Int,
   /// Groth16 proof that the spend is valid
   proof: Groth16Proof,
 }

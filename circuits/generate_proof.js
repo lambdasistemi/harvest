@@ -1,11 +1,12 @@
 const snarkjs = require("snarkjs");
 const fs = require("fs");
+const { keygen, sign, initPoseidon } = require("./lib/jubjub_eddsa.js");
 
 async function main() {
   const zkey = "build/voucher_spend.zkey";
 
   // Load parameters from file or use defaults
-  let S_old, d, S_new, C, r_old, r_new, user_secret, cert_nonce;
+  let S_old, d, S_new, C, r_old, r_new, user_secret;
   const paramFile = process.argv[2];
   if (paramFile) {
     const params = JSON.parse(fs.readFileSync(paramFile, "utf8"));
@@ -16,7 +17,6 @@ async function main() {
     r_old = BigInt(params.r_old);
     r_new = BigInt(params.r_new);
     user_secret = BigInt(params.user_secret);
-    cert_nonce = BigInt(params.cert_nonce);
   } else {
     // Default test case
     S_old = 25n;
@@ -26,13 +26,12 @@ async function main() {
     r_old = 12345678n;
     r_new = 87654321n;
     user_secret = 42n;
-    cert_nonce = 999n;
   }
 
   const { execSync } = require("child_process");
 
   // Compile Poseidon helper circuits for BLS12-381 field (individual signal names)
-  for (const [name, n] of [["hash1_helper", 1], ["hash2_helper", 2], ["hash3_helper", 3]]) {
+  for (const [name, n] of [["hash1_helper", 1], ["hash2_helper", 2], ["hash5_helper", 5]]) {
     if (!fs.existsSync(`build/${name}_js/${name}.wasm`)) {
       const signals = Array.from({length: n}, (_, i) => `    signal input v${i};`).join("\n");
       const assigns = Array.from({length: n}, (_, i) => `    h.inputs[${i}] <== v${i};`).join("\n");
@@ -41,6 +40,9 @@ async function main() {
       execSync(`circom build/${name}.circom --prime bls12381 --wasm -l node_modules -o build/`, { stdio: "pipe" });
     }
   }
+
+  // Initialize Poseidon for EdDSA signing
+  await initPoseidon(__dirname);
 
   // Compute Poseidon hash using the helper circuit's witness calculator
   async function poseidonHash(inputs, helperName) {
@@ -57,14 +59,23 @@ async function main() {
     return witness[1].toString();
   }
 
-  // Compute all derived values
+  // Compute user_id
   const user_id = await poseidonHash([user_secret], "hash1_helper");
-  const cert_hash = await poseidonHash([BigInt(user_id), C, cert_nonce], "hash3_helper");
+  console.log("user_id:", user_id);
+
+  // Generate issuer keypair and sign certificate
+  const issuer = keygen();
+  console.log("issuer_Ax:", issuer.pkx.toString().substring(0, 20) + "...");
+  console.log("issuer_Ay:", issuer.pky.toString().substring(0, 20) + "...");
+
+  // Certificate message: Poseidon(user_id, cap)
+  const certMsg = BigInt(await poseidonHash([BigInt(user_id), C], "hash2_helper"));
+  const sig = await sign(issuer.sk, issuer.pkx, issuer.pky, certMsg);
+  console.log("sig_S:", sig.S.toString().substring(0, 20) + "...");
+
+  // Compute commitments
   const commit_old = await poseidonHash([S_old, r_old], "hash2_helper");
   const commit_new = await poseidonHash([S_new, r_new], "hash2_helper");
-
-  console.log("user_id:", user_id);
-  console.log("cert_hash:", cert_hash);
   console.log("commit_S_old:", commit_old);
   console.log("commit_S_new:", commit_new);
 
@@ -72,15 +83,18 @@ async function main() {
     d: d.toString(),
     commit_S_old: commit_old,
     commit_S_new: commit_new,
-    cert_hash: cert_hash,
     user_id: user_id,
+    issuer_Ax: issuer.pkx.toString(),
+    issuer_Ay: issuer.pky.toString(),
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),
     r_old: r_old.toString(),
     r_new: r_new.toString(),
     user_secret: user_secret.toString(),
-    cert_nonce: cert_nonce.toString(),
+    sig_R8x: sig.R8x.toString(),
+    sig_R8y: sig.R8y.toString(),
+    sig_S: sig.S.toString(),
   };
 
   fs.writeFileSync("build/input.json", JSON.stringify(input));

@@ -8,7 +8,7 @@ use voucher/types.{SpendRedeemer, VerificationKey, VoucherDatum}
 ///
 /// Verifies a Groth16 proof that:
 ///   1. The user knows a secret matching user_id
-///   2. The user holds a valid certificate (cert_hash) for this user_id
+///   2. The user holds a valid issuer-signed certificate for this user_id
 ///   3. The spend amount d plus the old counter doesn't exceed the cap
 ///   4. The committed counters are correctly computed
 ///
@@ -23,14 +23,15 @@ validator voucher_spend(vk: VerificationKey) {
     expect Some(voucher) = datum
 
     // Public inputs match the circuit:
-    //   [d, commit_S_old, commit_S_new, cert_hash, user_id]
+    //   [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay]
     let public_inputs =
       [
         redeemer.d,
         voucher.commit_spent,
         redeemer.commit_spent_new,
-        redeemer.cert_hash,
         voucher.user_id,
+        redeemer.issuer_ax,
+        redeemer.issuer_ay,
       ]
 
     // Verify the Groth16 proof

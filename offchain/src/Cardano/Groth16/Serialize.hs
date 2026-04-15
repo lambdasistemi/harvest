@@ -41,38 +41,42 @@ vkToData vk =
         ]
 
 {- | Encode a spend redeemer as PlutusData.
-Matches Aiken: Constr 0 [Int d, Int commit_spent_new, Groth16Proof]
+Matches Aiken: Constr 0 [Int d, Int commit_spent_new, Int issuer_ax, Int issuer_ay, Groth16Proof]
 -}
-spendRedeemerToData :: Integer -> Integer -> CompressedProof -> PlutusData
-spendRedeemerToData d commitNew proof =
+spendRedeemerToData
+    :: Integer -> Integer -> Integer -> Integer -> CompressedProof -> PlutusData
+spendRedeemerToData d commitNew issuerAx issuerAy proof =
     Constr
         0
         [ Integer d
         , Integer commitNew
+        , Integer issuerAx
+        , Integer issuerAy
         , groth16ProofToData proof
         ]
 
 {- | Encode a voucher datum as PlutusData.
-Matches Aiken: Constr 0 [Bytes user_pk, Int commit_spent]
+Matches Aiken: Constr 0 [Int user_id, Int commit_spent]
 -}
-voucherDatumToData :: ByteString -> Integer -> PlutusData
-voucherDatumToData userPk commitSpent =
+voucherDatumToData :: Integer -> Integer -> PlutusData
+voucherDatumToData userId commitSpent =
     Constr
         0
-        [ Bytes userPk
+        [ Integer userId
         , Integer commitSpent
         ]
 
 groth16ProofToCBOR :: CompressedProof -> ByteString
 groth16ProofToCBOR = encodePlutusData . groth16ProofToData
 
-spendRedeemerToCBOR :: Integer -> Integer -> CompressedProof -> ByteString
-spendRedeemerToCBOR d commitNew proof =
-    encodePlutusData (spendRedeemerToData d commitNew proof)
+spendRedeemerToCBOR
+    :: Integer -> Integer -> Integer -> Integer -> CompressedProof -> ByteString
+spendRedeemerToCBOR d commitNew issuerAx issuerAy proof =
+    encodePlutusData (spendRedeemerToData d commitNew issuerAx issuerAy proof)
 
-voucherDatumToCBOR :: ByteString -> Integer -> ByteString
-voucherDatumToCBOR userPk commitSpent =
-    encodePlutusData (voucherDatumToData userPk commitSpent)
+voucherDatumToCBOR :: Integer -> Integer -> ByteString
+voucherDatumToCBOR userId commitSpent =
+    encodePlutusData (voucherDatumToData userId commitSpent)
 
 vkToCBOR :: CompressedVK -> ByteString
 vkToCBOR = encodePlutusData . vkToData
