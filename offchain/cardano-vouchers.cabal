@@ -28,7 +28,7 @@ library
     , process               >= 1.6
     , plutus-tx
     , plutus-core
-    , cardano-ledger-api
+    , cardano-ledger-conway
     , cardano-ledger-core
     , cardano-ledger-mary
     , cardano-node-clients

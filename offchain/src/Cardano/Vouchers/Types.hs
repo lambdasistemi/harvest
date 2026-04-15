@@ -6,7 +6,7 @@ module Cardano.Vouchers.Types (
 ) where
 
 import Data.ByteString (ByteString)
-import PlutusCore.Data qualified as PLC
+import qualified PlutusCore.Data as PLC
 import PlutusTx.IsData.Class (ToData (..))
 import PlutusTx.Builtins.Internal (BuiltinData (..))
 
