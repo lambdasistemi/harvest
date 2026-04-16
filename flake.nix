@@ -158,6 +158,7 @@
         packages = {
           default = groth16-ffi;
           inherit groth16-ffi circuit;
+          encode-vk = components.exes.encode-vk;
         };
 
         checks = hsChecks // {
