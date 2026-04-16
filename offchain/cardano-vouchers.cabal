@@ -27,6 +27,7 @@ library
     , text                  >= 1.2
     , vector                >= 0.12
     , process               >= 1.6
+    , base16-bytestring
     , plutus-tx
     , plutus-core
     , cardano-ledger-alonzo
@@ -37,6 +38,18 @@ library
   extra-libraries:
     groth16_ffi
 
+executable encode-vk
+  hs-source-dirs:  app
+  main-is:         EncodeVK.hs
+  default-language: Haskell2010
+  ghc-options:     -Wall
+  build-depends:
+    , base
+    , cardano-vouchers
+    , aeson
+    , bytestring
+    , base16-bytestring
+
 test-suite unit-tests
   type:            exitcode-stdio-1.0
   hs-source-dirs:  test
@@ -45,9 +58,12 @@ test-suite unit-tests
   ghc-options:     -Wall -threaded
   other-modules:
     Groth16Spec
+    E2ESpec
   build-depends:
     , base
     , cardano-vouchers
     , bytestring
     , aeson
+    , base16-bytestring
+    , cardano-ledger-core
     , hspec >= 2.0
