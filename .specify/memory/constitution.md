@@ -110,21 +110,32 @@ If a reificator is stolen or destroyed:
 | **User's phone** | User secret, spend randomness, cap certificates (signed by shop key), reification certificates (signed by reificator key) |
 | **Reificator** | Reificator key (burned by distributor), shop key (burned by shop), Cardano payment key + UTXO for fees |
 
-### VIII. Reificator Funding
+### VIII. Economic Model
 
-The reificator is a transacting device — it submits on-chain transactions and pays fees in ADA. The shop funds the reificator, the same way it pays card processing fees. The reificator holds a Cardano payment key and a UTXO for fees.
+The costs flow downward from coalition to shop:
+
+| Actor | Responsibility | Cost |
+|-------|---------------|------|
+| **Coalition** | Publishes trie roots off-chain | Minimal — just root publication |
+| **Data providers** | Serve Merkle proofs to reificators (untrusted, verifiable against on-chain root) | Paid per query by reificators |
+| **Reificators** | Query providers for proofs, build and submit transactions | Paid from the device's UTXO |
+| **Shops** | Fund their reificators' UTXOs with ADA | Cost of doing business (like card processing fees) |
+
+The shop refills the reificator's UTXO. The reificator spends from it for transaction fees and data provider queries. The busier the reificator, the more the shop pays. Data providers compete on price and availability — the market sets the cost.
 
 Fee deduction from loyalty points (converting points to ADA on-chain) is a future optimization, not a day-one requirement.
 
 ### IX. On-Chain State: Three Tries
 
-The coalition state is three Merkle Patricia Tries:
+A single UTXO holds the current root hash of three Merkle Patricia Tries:
 
 | Trie | Structure | Purpose |
 |------|-----------|---------|
 | **Spend trie** | issuer → user → commit(spent) | Tracks cumulative spending per user per issuer |
 | **Reificator trie** | shop → reificator_pk | Authorized devices, managed by shops |
 | **Pending trie** | reificator_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
+
+The full trie data lives off-chain, published by the coalition. Untrusted data providers serve Merkle proofs verified against the on-chain root. The on-chain validator checks the Merkle proof in each transaction's redeemer and outputs a new root UTXO with the updated hash.
 
 Every spend involves two on-chain transactions:
 
