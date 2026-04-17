@@ -58,6 +58,10 @@ spendVoucher ::
     Integer ->
     -- | issuer_ay (issuer's EdDSA public key, y coordinate)
     Integer ->
+    -- | acceptor_ax (acceptor's EdDSA public key, x coordinate)
+    Integer ->
+    -- | acceptor_ay (acceptor's EdDSA public key, y coordinate)
+    Integer ->
     -- | The ZK proof
     Groth16Proof ->
     -- | (input index, output index)
@@ -73,6 +77,8 @@ spendVoucher
     commitNew
     issuerAx
     issuerAy
+    acceptorAx
+    acceptorAy
     proof = do
         -- Attach the validator script
         attachScript script
@@ -87,6 +93,8 @@ spendVoucher
                     , srCommitSpentNew = commitNew
                     , srIssuerAx = issuerAx
                     , srIssuerAy = issuerAy
+                    , srAcceptorAx = acceptorAx
+                    , srAcceptorAy = acceptorAy
                     , srProof = proof
                     }
         -- Output back to the script address with updated datum

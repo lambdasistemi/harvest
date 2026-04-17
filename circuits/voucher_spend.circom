@@ -24,6 +24,13 @@ include "lib/eddsa_jubjub.circom";
 ///   - user_id       : Poseidon(user_secret), matches on-chain entry
 ///   - issuer_Ax     : issuer's EdDSA public key (x coordinate)
 ///   - issuer_Ay     : issuer's EdDSA public key (y coordinate)
+///   - acceptor_Ax   : acceptor's EdDSA public key (x coordinate) — shop where spend happens
+///   - acceptor_Ay   : acceptor's EdDSA public key (y coordinate)
+///
+/// The acceptor public key is pass-through inside the circuit: no constraint
+/// references it. It is bound into the Groth16 proof as a public input so the
+/// on-chain validator can check the submitting reificator belongs to that shop
+/// (reificator trie lookup — enforced by the validator, not the circuit).
 ///
 /// Private inputs (only the user knows):
 ///   - S_old         : old running total of spent tokens
@@ -44,6 +51,8 @@ template VoucherSpend(nBits) {
     signal input user_id;
     signal input issuer_Ax;
     signal input issuer_Ay;
+    signal input acceptor_Ax;
+    signal input acceptor_Ay;
 
     // --- private inputs ---
     signal input S_old;
@@ -99,4 +108,4 @@ template VoucherSpend(nBits) {
 }
 
 // 32-bit range: caps up to ~4 billion tokens
-component main {public [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay]} = VoucherSpend(32);
+component main {public [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]} = VoucherSpend(32);

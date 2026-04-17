@@ -49,6 +49,7 @@ async function main() {
   // Compute derived values
   const user_id = await poseidonHash([user_secret], "hash1_helper");
   const issuer = keygen();
+  const acceptor = keygen();
   const certMsg = BigInt(await poseidonHash([BigInt(user_id), C], "hash2_helper"));
   const sig = await sign(issuer.sk, issuer.pkx, issuer.pky, certMsg);
   const commit_old = await poseidonHash([S_old, r_old], "hash2_helper");
@@ -61,6 +62,8 @@ async function main() {
     user_id: user_id,
     issuer_Ax: issuer.pkx.toString(),
     issuer_Ay: issuer.pky.toString(),
+    acceptor_Ax: acceptor.pkx.toString(),
+    acceptor_Ay: acceptor.pky.toString(),
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),
@@ -99,10 +102,18 @@ async function main() {
     pky: issuer.pky.toString(),
   }, null, 2));
 
+  // Save acceptor keypair (for test reuse)
+  fs.writeFileSync(`${outDir}/acceptor.json`, JSON.stringify({
+    sk: acceptor.sk.toString(),
+    pkx: acceptor.pkx.toString(),
+    pky: acceptor.pky.toString(),
+  }, null, 2));
+
   console.log("Fixtures generated in", outDir);
   console.log("Public signals:", publicSignals);
   console.log("user_id:", user_id);
   console.log("issuer_Ax:", issuer.pkx.toString().substring(0, 20) + "...");
+  console.log("acceptor_Ax:", acceptor.pkx.toString().substring(0, 20) + "...");
 
   // Verify off-chain
   const valid = await snarkjs.groth16.verify(vk, publicSignals, proof);

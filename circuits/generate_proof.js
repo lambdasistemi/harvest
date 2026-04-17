@@ -68,6 +68,11 @@ async function main() {
   console.log("issuer_Ax:", issuer.pkx.toString().substring(0, 20) + "...");
   console.log("issuer_Ay:", issuer.pky.toString().substring(0, 20) + "...");
 
+  // Generate acceptor keypair (pass-through public input — bound by proof, checked by validator)
+  const acceptor = keygen();
+  console.log("acceptor_Ax:", acceptor.pkx.toString().substring(0, 20) + "...");
+  console.log("acceptor_Ay:", acceptor.pky.toString().substring(0, 20) + "...");
+
   // Certificate message: Poseidon(user_id, cap)
   const certMsg = BigInt(await poseidonHash([BigInt(user_id), C], "hash2_helper"));
   const sig = await sign(issuer.sk, issuer.pkx, issuer.pky, certMsg);
@@ -86,6 +91,8 @@ async function main() {
     user_id: user_id,
     issuer_Ax: issuer.pkx.toString(),
     issuer_Ay: issuer.pky.toString(),
+    acceptor_Ax: acceptor.pkx.toString(),
+    acceptor_Ay: acceptor.pky.toString(),
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),
