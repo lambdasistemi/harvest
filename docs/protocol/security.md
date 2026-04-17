@@ -68,11 +68,11 @@ Operations where **authorization** is needed but nothing is hidden.
 
 **Attack**: Customer presents the same spend proof to two different reificators simultaneously.
 
-**Defense**: The ZK proof binds the spending shop's public key (`shop_pk`). Each proof targets one shop. The on-chain validator checks the submitting reificator belongs to that shop. Two different shops = two different proofs needed = two different counter updates.
+**Defense**: The ZK proof binds the acceptor's public key (the `shop_pk` of the shop where the spend happens). Each proof targets one acceptor. The on-chain validator checks the submitting reificator belongs to that shop. Two different acceptors = two different proofs needed = two different counter updates.
 
 ```mermaid
 graph TD
-    PROOF["Proof: d=10, shop=B"] -->|submit via B's reificator| OK[Valid]
+    PROOF["Proof: d=10, acceptor=B"] -->|submit via B's reificator| OK[Valid]
     PROOF -->|submit via C's reificator| FAIL[Rejected: reificator not under shop B]
 ```
 
@@ -92,7 +92,7 @@ graph TD
 
 **Attack**: Reificator from shop A submits a proof intended for shop B.
 
-**Defense**: The proof includes `shop_pk` as a public input. The validator checks the reificator trie: is this `reificator_pk` registered under `shop_pk`? If not, the transaction is rejected.
+**Defense**: The proof includes the `acceptor_pk` (the spending shop's `shop_pk`) as a public input. The validator checks the reificator trie: is this `reificator_pk` registered under `acceptor_pk`? If not, the transaction is rejected.
 
 ### Stolen reificator
 
@@ -163,7 +163,7 @@ graph LR
 
 | Observer | Learns | Does not learn |
 |----------|--------|---------------|
-| On-chain observer | `d`, `user_id`, `issuer_pk`, `shop_pk`, `commit(spent)` | Cap, actual spent total, balance, user identity |
-| Issuer (shop that gave cap) | Cap they signed, user_id | Other shops' caps, total spent, when/where redeemed |
-| Spending shop | Amount `d` being redeemed | Cap, total spent, which shop issued the certificate |
+| On-chain observer | `d`, `user_id`, `issuer_pk`, `acceptor_pk`, `commit(spent)` | Cap, actual spent total, balance, user identity |
+| Issuer (shop that signed the cap) | Cap they signed, user_id | Other shops' caps, total spent, when/where redeemed |
+| Acceptor (shop where the spend happens) | Amount `d` being redeemed | Cap, total spent, which shop issued the certificate |
 | Data provider | Trie structure, entry existence | Nothing beyond what's on-chain |

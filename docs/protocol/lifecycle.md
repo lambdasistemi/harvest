@@ -83,7 +83,7 @@ sequenceDiagram
     R->>P: reification certificate (nonce, d=3)
 ```
 
-Note: the **issuer** (shop A, who signed the cap) and the **spending shop** (shop B, whose reificator submits) are different entities. This is the coalition model.
+Note: the **issuer** (shop A, who signed the cap) and the **acceptor** (shop B, whose reificator submits) are different entities. Both are shops in the coalition — "issuer" and "acceptor" are role labels for this transaction, not separate actor types. This is the coalition model.
 
 ## Phase 6: Subsequent Spend
 

@@ -66,9 +66,9 @@ Redeemer: ZK proof + Merkle proof (membership or non-membership in spend trie)
 Outputs: new root UTXO (updated spend trie + pending trie)
 
 Validator checks:
-  1. Groth16 proof valid against public inputs [d, commit_old, commit_new, user_id, issuer_pk, shop_pk]
+  1. Groth16 proof valid against public inputs [d, commit_old, commit_new, user_id, issuer_pk, acceptor_pk]
   2. issuer_pk is a registered shop (reificator trie membership)
-  3. reificator_pk is registered under shop_pk (reificator trie membership)
+  3. reificator_pk is registered under acceptor_pk (reificator trie membership)
   4. Merkle proof valid against current spend trie root
   5. New root computed correctly from trie updates
 ```

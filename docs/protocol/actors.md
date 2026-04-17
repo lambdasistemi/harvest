@@ -43,11 +43,15 @@ A business in the coalition. Sovereign once onboarded.
 
 | Has | Purpose |
 |-----|---------|
-| Key pair (`shop_pk`, `shop_sk`) | Sign cap certificates (issuer identity) |
+| Key pair (`shop_pk`, `shop_sk`) | Sign cap certificates; identify the shop on-chain |
 | Master key (held separately) | Revert pending entries after device loss |
 | Fleet of reificators | Physical cashing points |
 
 The shop key is burned into reificators at installation. The master key is **never** on a device — it's the recovery authority.
+
+### Role terminology: issuer vs acceptor
+
+Every coalition member is a **Shop** with a single key pair (`shop_pk`, `shop_sk`). In a given spend transaction, one shop plays the **issuer** role (signed the cap certificate) and one shop plays the **acceptor** role (its reificator submits the proof and its counter is updated). Issuer and acceptor can be the same shop or different shops — these are per-transaction role labels, not separate actor types. The circuit's public inputs refer to `issuer_pk` and `acceptor_pk`, both of which are `shop_pk` values of coalition members.
 
 ## Reificator
 
