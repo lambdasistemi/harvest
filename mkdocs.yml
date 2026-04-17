@@ -1,0 +1,51 @@
+site_name: Cardano Vouchers
+site_url: https://lambdasistemi.github.io/cardano-vouchers/
+repo_url: https://github.com/lambdasistemi/cardano-vouchers
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.path
+    - toc.integrate
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - footnotes
+  - def_list
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/gh/paolino/dev-assets@main/mkdocs/docs/js/read-aloud.js
+
+nav:
+  - Home: index.md
+  - Protocol:
+    - Semantics: protocol/semantics.md
+    - Actors: protocol/actors.md
+    - Lifecycle: protocol/lifecycle.md
+    - Security: protocol/security.md
+  - Architecture:
+    - On-Chain State: architecture/on-chain.md
+    - Cryptography: architecture/cryptography.md
+    - Economics: architecture/economics.md

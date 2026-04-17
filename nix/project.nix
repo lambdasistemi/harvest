@@ -1,4 +1,4 @@
-{ pkgs, groth16-ffi, CHaP }:
+{ pkgs, groth16-ffi, CHaP, mkdocsPkg }:
 let
   project = pkgs.haskell-nix.cabalProject' {
     src = ../offchain;
@@ -46,6 +46,7 @@ let
         circom
         nodejs
         groth16-ffi
+        mkdocsPkg
       ];
       withHoogle = false;
     };

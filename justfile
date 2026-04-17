@@ -57,5 +57,17 @@ setup: circuit
 prove:
     cd circuits && node generate_proof.js
 
+# Build docs
+build-docs:
+    mkdocs build
+
+# Serve docs locally
+serve-docs:
+    mkdocs serve
+
+# Deploy docs to GitHub Pages
+deploy-docs:
+    mkdocs gh-deploy --force
+
 # CI: full check
 ci: build test format-check hlint

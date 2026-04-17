@@ -12,6 +12,7 @@
     nixpkgs.follows = "haskellNix/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     aiken.url = "github:aiken-lang/aiken";
+    mkdocs.url = "github:paolino/dev-assets?dir=mkdocs";
     iohkNix = {
       url = "github:input-output-hk/iohk-nix/0ce7cc21b9a4cfde41871ef486d01a8fafbf9627";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -22,7 +23,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP }:
+  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP, mkdocs }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
@@ -45,7 +46,9 @@
         };
 
         # Haskell project via haskell.nix
-        project = import ./nix/project.nix { inherit pkgs groth16-ffi CHaP; };
+        mkdocsPkg = mkdocs.devShells.${system}.default;
+
+        project = import ./nix/project.nix { inherit pkgs groth16-ffi CHaP mkdocsPkg; };
         components = project.hsPkgs.cardano-vouchers.components;
 
         # Circuit compilation (Circom → R1CS + WASM)
