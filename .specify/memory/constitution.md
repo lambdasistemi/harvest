@@ -97,7 +97,8 @@ If a reificator is stolen or destroyed:
 - **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. The reificator cannot alter it without invalidating the proof.
 - **No certificate replay**: Reification certificates carry nonces. Each nonce maps to a pending trie entry, consumed on redemption.
 - **Reificator-bound**: Reification certificates are redeemable only at the reificator that issued them.
-- **Recoverable**: Stolen/destroyed devices cannot prevent recovery. The shop's master key can revert all pending entries.
+- **Recoverable**: Stolen, destroyed, or malfunctioning devices cannot prevent recovery. The shop's master key can revert all pending entries. The pending trie provides on-chain evidence for the shop to act on.
+- **Threat model**: The protocol protects against device failure (malfunction, theft, vandalism), not against malicious shops. The shop is assumed cooperative — it has every incentive to serve its customers. Collusion between shop and reificator is outside the threat model.
 
 #### State
 
