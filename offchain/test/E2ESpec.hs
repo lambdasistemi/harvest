@@ -1,24 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Integration test: load all E2E fixtures (applied script, proof, VK)
--- and verify they parse, compress, and encode correctly.
+{- | Integration test: load all E2E fixtures (applied script, proof, VK)
+and verify they parse, compress, and encode correctly.
+-}
 module E2ESpec (spec) where
 
 import Cardano.Groth16.Compress (compressProof, compressVK)
 import Cardano.Groth16.Serialize (
-    groth16ProofToData
-    , spendRedeemerToData
-    , voucherDatumToData
+    groth16ProofToData,
+    spendRedeemerToData,
+    voucherDatumToData,
  )
 import Cardano.Groth16.Types (CompressedProof (..), CompressedVK (..), SnarkjsProof, SnarkjsVK)
+import Cardano.Ledger.BaseTypes (Network (..)) -- re-exported via harvest
 import Cardano.PlutusData (encodePlutusData)
-import Harvest.Script (loadScript, scriptAddr)
-import Cardano.Ledger.BaseTypes (Network (..))  -- re-exported via harvest
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
-import qualified Data.ByteString.Short as SBS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Short as SBS
+import Harvest.Script (loadScript, scriptAddr)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 
 spec :: Spec

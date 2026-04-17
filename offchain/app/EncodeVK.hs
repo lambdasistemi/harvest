@@ -1,5 +1,6 @@
--- | Read a snarkjs verification_key.json, compress points, output
--- PlutusData CBOR as hex (for aiken blueprint apply).
+{- | Read a snarkjs verification_key.json, compress points, output
+PlutusData CBOR as hex (for aiken blueprint apply).
+-}
 module Main (main) where
 
 import Cardano.Groth16.Compress (compressVK)
