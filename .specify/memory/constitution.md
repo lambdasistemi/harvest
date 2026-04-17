@@ -44,38 +44,70 @@ Spending and redemption are decoupled in time and space.
 - **Redemption**: The casher acknowledges the reified amount and applies the discount.
 - **Topup**: The casher loads new reward points. The reificator signs a fresh cap certificate and sends it to the customer's phone.
 
+#### Key Ceremony
+
+The reificator is a secure hardware device. Two keys are burned in at different times by different authorities:
+
+1. **Reificator key** — burned in at manufacturing by the coalition/distributor. This is the device's own identity. At ceremony time, the reificator's public key is added to the on-chain reificator trie.
+2. **Shop key** — burned in when the device is installed at a shop. This is the shop's authority for signing cap certificates (issuer_pk in the circuit).
+
+Both keys live in secure hardware. Neither can be extracted. If the device is stolen, the shop's master key (held separately, not on the device) can sign reverts and revoke the reificator from the on-chain trie.
+
 #### Two Signing Roles
 
 The reificator signs in two capacities:
 
 1. **As the shop** (issuer): signs cap certificates (`issuer_pk` in the circuit). These are verified inside the ZK proof on-chain.
-2. **As itself** (reificator identity): signs reification certificates, bound to its own identity and a nonce. These are verified at redemption by checking the nonce against the unredeemed set.
+2. **As itself** (reificator identity): signs reification certificates, bound to its own identity and a nonce. These are verified at redemption by checking the nonce against the pending trie.
+
+#### Spend Lifecycle
+
+A spend has three states:
+
+```
+committed → redeemed  (reificator signs — device confirms physical redemption)
+         → reverted   (shop signs — business authority reverses the settlement)
+```
+
+The reificator can redeem but cannot revert. The shop can revert but cannot redeem. Separation of concerns — the physical device handles the happy path, the business authority handles recovery.
 
 #### Flow
 
 1. **At home**: Customer contacts the reificator remotely with a spending proof.
-2. **Settlement**: Reificator submits the proof on-chain, waits for confirmation. Stores the nonce.
+2. **Settlement**: Reificator submits the proof on-chain. The spend counter updates and a pending entry is created in the pending trie (committed state).
 3. **Certificate**: Reificator returns a signed reification certificate (with nonce) to the phone.
 4. **At the shop**: Customer reaches the cashing point. Reificator screen is dormant.
-5. **Reification**: Customer presents certificate. Reificator verifies nonce is in its unredeemed set, switches to present state — displays the spent amount.
-6. **Redemption**: Casher acknowledges, applies the discount. Nonce consumed.
+5. **Reification**: Customer presents certificate. Reificator verifies nonce exists in the pending trie, switches to present state — displays the spent amount.
+6. **Redemption**: Casher acknowledges, applies the discount. Reificator signs the redemption — pending entry removed from trie (redeemed).
 7. **Topup**: Casher sets new reward amount. Reificator signs a fresh cap certificate for the shop, sends to phone.
 8. **Dormant**: Reificator screen goes dormant. Background settlement continues.
+
+#### Device Loss / Theft
+
+If a reificator is stolen or destroyed:
+
+1. Shop removes the reificator's public key from the on-chain reificator trie (revocation).
+2. Shop walks the stolen reificator's subtree in the pending trie.
+3. Shop signs reverts for all committed-but-unredeemed entries — spend counters are rolled back, pending entries removed.
+4. Affected customers' on-chain state is restored. They can re-spend through a different reificator.
 
 #### Security Properties
 
 - **No double-spend**: Settlement happens before the customer visits the shop. On-chain confirmation has minutes/hours, not seconds.
-- **No amount tampering**: The ZK proof binds the spend amount `d`. The reificator cannot alter it without invalidating the proof. The on-chain validator enforces this.
-- **No certificate replay**: Reification certificates carry nonces. Each nonce is consumed on redemption.
+- **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. The reificator cannot alter it without invalidating the proof.
+- **No certificate replay**: Reification certificates carry nonces. Each nonce maps to a pending trie entry, consumed on redemption.
 - **Reificator-bound**: Reification certificates are redeemable only at the reificator that issued them.
+- **Recoverable**: Stolen/destroyed devices cannot prevent recovery. The shop's master key can revert all pending entries.
 
 #### State
 
 | Location | What it holds |
 |----------|--------------|
-| **On-chain** | `user_id → commit(spent)` per issuer (the UTXO at the script address) |
-| **User's phone** | User secret, spend randomness, cap certificates (signed by reificators-as-shops), reification certificates (signed by reificators-as-themselves) |
-| **Reificator** | Signing key (shop + self), set of unredeemed nonces, Cardano payment key + UTXO for fees |
+| **On-chain — spend trie** | issuer → user → commit(spent) |
+| **On-chain — reificator trie** | shop → reificator_pk (authorized devices) |
+| **On-chain — pending trie** | reificator_pk → nonce → {user_id, amount} |
+| **User's phone** | User secret, spend randomness, cap certificates (signed by shop key), reification certificates (signed by reificator key) |
+| **Reificator** | Reificator key (burned by distributor), shop key (burned by shop), Cardano payment key + UTXO for fees |
 
 ### VIII. Reificator Funding
 
@@ -83,9 +115,17 @@ The reificator is a transacting device — it submits on-chain transactions and 
 
 Fee deduction from loyalty points (converting points to ADA on-chain) is a future optimization, not a day-one requirement.
 
-### IX. On-Chain State: Nested Trie
+### IX. On-Chain State: Three Tries
 
-The shared state is a Merkle Patricia Trie of tries: issuer -> user -> committed spend counter. A spend transaction updates one or more leaves, each with its own Groth16 proof. The trie root sits in a single coalition UTXO.
+The coalition state is three Merkle Patricia Tries:
+
+| Trie | Structure | Purpose |
+|------|-----------|---------|
+| **Spend trie** | issuer → user → commit(spent) | Tracks cumulative spending per user per issuer |
+| **Reificator trie** | shop → reificator_pk | Authorized devices, managed by shops |
+| **Pending trie** | reificator_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
+
+A settlement transaction updates the spend trie (counter goes up) and inserts into the pending trie. A redemption removes from the pending trie. A revert removes from the pending trie and rolls back the spend trie.
 
 ### X. Correct Before Optimized
 
