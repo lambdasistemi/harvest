@@ -40,11 +40,11 @@ spec = describe "E2E fixture validation" $ do
         BS.length (cpB cp) `shouldBe` 96
         BS.length (cpC cp) `shouldBe` 48
 
-    it "compresses VK from fixtures with 7 IC points" $ do
+    it "compresses VK from fixtures with 9 IC points" $ do
         vkJson <- LBS.readFile "test/fixtures/verification_key.json"
         let Right vk = Aeson.eitherDecode vkJson :: Either String SnarkjsVK
         cvk <- compressVK vk
-        length (cvIC cvk) `shouldBe` 7
+        length (cvIC cvk) `shouldBe` 9
         BS.length (cvAlpha cvk) `shouldBe` 48
         BS.length (cvBeta cvk) `shouldBe` 96
 
@@ -54,6 +54,9 @@ spec = describe "E2E fixture validation" $ do
         cp <- compressProof proof
         let issuerAx = 38027910944389743520483063064820863072988122188084404123017356326968334007437
             issuerAy = 42941175320000579223328167288954972786414509136882026862597282785302372595651
-            redeemer = spendRedeemerToData 10 999 issuerAx issuerAy cp
+            acceptorAx = 6983986702542899954628519304086182057889757455360727493320948977468498651684
+            acceptorAy = 11603074077413385000596357033630636871603057286790587959243768465754372931847
+            redeemer =
+                spendRedeemerToData 10 999 issuerAx issuerAy acceptorAx acceptorAy cp
             cbor = encodePlutusData redeemer
         BS.length cbor `shouldSatisfy` (> 0)

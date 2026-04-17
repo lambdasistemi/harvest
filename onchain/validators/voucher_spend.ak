@@ -23,7 +23,8 @@ validator voucher_spend(vk: VerificationKey) {
     expect Some(voucher) = datum
 
     // Public inputs match the circuit:
-    //   [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay]
+    //   [d, commit_S_old, commit_S_new, user_id,
+    //    issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]
     let public_inputs =
       [
         redeemer.d,
@@ -32,6 +33,8 @@ validator voucher_spend(vk: VerificationKey) {
         voucher.user_id,
         redeemer.issuer_ax,
         redeemer.issuer_ay,
+        redeemer.acceptor_ax,
+        redeemer.acceptor_ay,
       ]
 
     // Verify the Groth16 proof

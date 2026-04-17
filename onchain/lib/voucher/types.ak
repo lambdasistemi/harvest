@@ -16,7 +16,7 @@ pub type VerificationKey {
   beta_g2: ByteArray,
   gamma_g2: ByteArray,
   delta_g2: ByteArray,
-  /// One per public input + 1 (7 for our circuit: ic[0..6])
+  /// One per public input + 1 (9 for our circuit: ic[0..8])
   ic: List<ByteArray>,
 }
 
@@ -38,6 +38,11 @@ pub type SpendRedeemer {
   issuer_ax: Int,
   /// Issuer's EdDSA public key (y coordinate, Jubjub curve)
   issuer_ay: Int,
+  /// Acceptor's EdDSA public key (x coordinate, Jubjub curve)
+  /// — the shop where the spend happens, bound by the Groth16 proof
+  acceptor_ax: Int,
+  /// Acceptor's EdDSA public key (y coordinate, Jubjub curve)
+  acceptor_ay: Int,
   /// Groth16 proof that the spend is valid
   proof: Groth16Proof,
 }

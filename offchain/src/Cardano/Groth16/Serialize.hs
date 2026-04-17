@@ -41,17 +41,27 @@ vkToData vk =
         ]
 
 {- | Encode a spend redeemer as PlutusData.
-Matches Aiken: Constr 0 [Int d, Int commit_spent_new, Int issuer_ax, Int issuer_ay, Groth16Proof]
+Matches Aiken: Constr 0 [Int d, Int commit_spent_new, Int issuer_ax, Int issuer_ay,
+Int acceptor_ax, Int acceptor_ay, Groth16Proof]
 -}
 spendRedeemerToData ::
-    Integer -> Integer -> Integer -> Integer -> CompressedProof -> PlutusData
-spendRedeemerToData d commitNew issuerAx issuerAy proof =
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    CompressedProof ->
+    PlutusData
+spendRedeemerToData d commitNew issuerAx issuerAy acceptorAx acceptorAy proof =
     Constr
         0
         [ Integer d
         , Integer commitNew
         , Integer issuerAx
         , Integer issuerAy
+        , Integer acceptorAx
+        , Integer acceptorAy
         , groth16ProofToData proof
         ]
 
@@ -70,9 +80,17 @@ groth16ProofToCBOR :: CompressedProof -> ByteString
 groth16ProofToCBOR = encodePlutusData . groth16ProofToData
 
 spendRedeemerToCBOR ::
-    Integer -> Integer -> Integer -> Integer -> CompressedProof -> ByteString
-spendRedeemerToCBOR d commitNew issuerAx issuerAy proof =
-    encodePlutusData (spendRedeemerToData d commitNew issuerAx issuerAy proof)
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    Integer ->
+    CompressedProof ->
+    ByteString
+spendRedeemerToCBOR d commitNew issuerAx issuerAy acceptorAx acceptorAy proof =
+    encodePlutusData
+        (spendRedeemerToData d commitNew issuerAx issuerAy acceptorAx acceptorAy proof)
 
 voucherDatumToCBOR :: Integer -> Integer -> ByteString
 voucherDatumToCBOR userId commitSpent =
