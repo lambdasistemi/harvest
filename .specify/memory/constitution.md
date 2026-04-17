@@ -26,7 +26,16 @@ User balances and voucher caps are never revealed on-chain. All on-chain data is
 
 ### V. Proof Soundness
 
-No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. The proof binds the spend amount `d` — the customer authorizes the exact amount by generating the proof. No party can alter `d` without invalidating the proof. A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, and commitment binding.
+No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. The proof binds two choices the customer makes:
+
+1. **Spend amount `d`** — the customer authorizes the exact amount. No party can alter it without invalidating the proof.
+2. **Spending shop `shop_pk`** — the customer chooses where to spend. The on-chain validator enforces that the submitting reificator belongs to this shop (checked against the reificator trie).
+
+The issuer (who signed the cap certificate) and the spending shop are **different entities** — this is the coalition model. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the reificator belongs to the chosen spending shop.
+
+Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, shop_Ax, shop_Ay]`
+
+A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, commitment binding, and spending shop binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
 
 ### VI. Monotonic State
 
@@ -73,7 +82,7 @@ The reificator can redeem but cannot revert. The shop can revert but cannot rede
 
 #### Flow
 
-1. **At home**: Customer contacts the reificator remotely with a spending proof.
+1. **At home**: Customer chooses a spending shop and generates a ZK proof binding both the amount `d` and the shop's public key. Contacts the shop's reificator remotely with the proof.
 2. **Settlement**: Reificator submits the proof on-chain. The spend counter updates and a pending entry is created in the pending trie (committed state).
 3. **Certificate**: Reificator returns a signed reification certificate (with nonce) to the phone.
 4. **At the shop**: Customer reaches the cashing point. Reificator screen is dormant.
@@ -94,7 +103,8 @@ If a reificator is stolen or destroyed:
 #### Security Properties
 
 - **No double-spend**: Settlement happens before the customer visits the shop. On-chain confirmation has minutes/hours, not seconds.
-- **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. The reificator cannot alter it without invalidating the proof.
+- **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. No party can alter it without invalidating the proof.
+- **No shop misdirection**: The ZK proof binds the spending shop's public key. The on-chain validator checks that the submitting reificator is registered under that shop in the reificator trie. A proof generated for shop B cannot be submitted by shop A's reificator.
 - **No certificate replay**: Reification certificates carry nonces. Each nonce maps to a pending trie entry on-chain, consumed on redemption.
 - **Reificator-bound**: Reification certificates are redeemable only at the reificator that issued them.
 - **Recoverable**: Stolen, destroyed, or malfunctioning devices cannot prevent recovery. The shop's master key can revert all pending entries. The pending trie provides on-chain evidence for the shop to act on.
