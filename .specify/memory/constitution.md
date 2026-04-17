@@ -29,13 +29,13 @@ User balances and voucher caps are never revealed on-chain. All on-chain data is
 No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. The proof binds two choices the customer makes:
 
 1. **Spend amount `d`** — the customer authorizes the exact amount. No party can alter it without invalidating the proof.
-2. **Spending shop `shop_pk`** — the customer chooses where to spend. The on-chain validator enforces that the submitting reificator belongs to this shop (checked against the reificator trie).
+2. **Acceptor `acceptor_pk`** — the customer chooses the spending shop (acceptor). The on-chain validator enforces that the submitting reificator belongs to this shop (checked against the reificator trie).
 
-The issuer (who signed the cap certificate) and the spending shop are **different entities** — this is the coalition model. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the reificator belongs to the chosen spending shop.
+The issuer (shop that signed the cap certificate) and the acceptor (shop where the spend happens) are role labels on coalition members, not separate actor types. Both are shops. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the reificator belongs to the chosen acceptor.
 
-Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, shop_Ax, shop_Ay]`
+Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]`
 
-A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, commitment binding, and spending shop binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
+A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, commitment binding, and acceptor binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
 
 ### VI. Monotonic State
 

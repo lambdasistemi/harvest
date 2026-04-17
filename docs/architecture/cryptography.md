@@ -27,8 +27,8 @@ graph LR
 | `commit_S_old` | field element | Old counter commitment |
 | `commit_S_new` | field element | New counter commitment |
 | `user_id` | field element | `Poseidon(user_secret)` |
-| `issuer_Ax`, `issuer_Ay` | field elements | Issuer's EdDSA public key (who signed the cap) |
-| `shop_Ax`, `shop_Ay` | field elements | Spending shop's public key (where to redeem) |
+| `issuer_Ax`, `issuer_Ay` | field elements | Issuer's EdDSA public key (shop that signed the cap) |
+| `acceptor_Ax`, `acceptor_Ay` | field elements | Acceptor's EdDSA public key (shop where the spend happens) |
 
 ### Circuit Private Inputs
 
