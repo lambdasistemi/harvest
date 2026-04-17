@@ -125,7 +125,14 @@ The coalition state is three Merkle Patricia Tries:
 | **Reificator trie** | shop → reificator_pk | Authorized devices, managed by shops |
 | **Pending trie** | reificator_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
 
-A settlement transaction updates the spend trie (counter goes up) and inserts into the pending trie. A redemption removes from the pending trie. A revert removes from the pending trie and rolls back the spend trie.
+Every spend involves two on-chain transactions:
+
+1. **Settlement tx**: updates the spend trie (counter goes up) and inserts into the pending trie. Submitted by the reificator, includes the Groth16 proof.
+2. **Redemption tx**: removes the entry from the pending trie. Submitted by the reificator after physical redemption, signed by the reificator key. No ZK proof needed.
+
+A revert is a single transaction: removes from the pending trie and rolls back the spend trie. Signed by the shop's master key.
+
+Topup is off-chain only — the shop signs a new cap certificate, no transaction. This is deliberate: topups are high-frequency, low-value (a few euros of rewards). Spends are low-frequency, high-value (30-50+ euros) — two transactions are economically negligible.
 
 ### X. Correct Before Optimized
 
