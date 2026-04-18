@@ -21,8 +21,11 @@ repository cardano-haskell-packages
 source-repository-package
   type: git
   location: https://github.com/lambdasistemi/cardano-node-clients
-  tag: 18ef6fdc705b37740b1398720924f234e5dd6860
-  --sha256: 04z900hvgqnswgb063sf6ambyj9d9xixwcpyf1jjl600d2f909bf
+  -- Feature-branch pin for the Ed25519 raw-serialise re-exports.
+  -- Bump to main SHA when the upstream PR lands and this work is ready
+  -- to merge downstream.
+  tag: f6296179878729562e29c31ecf5b2333537897d2
+  --sha256: 1m46vzkh9qkmmzfbrjwgw0fl4pajm0fs4qg4h7sm18aw3lwbwagj
 
 source-repository-package
   type: git

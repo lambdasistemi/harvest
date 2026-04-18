@@ -64,6 +64,8 @@ test-suite unit-tests
     SignedDataLayoutSpec
     Ed25519Spec
     DevnetSpendSpec
+    SpendHarness
+    SpendHarnessSpec
   build-depends:
     , base
     , harvest
