@@ -34,11 +34,17 @@ jobs:
       # Shell-app checks must be *executed*, not just built, so the
       # underlying test binary actually runs. Every new E2E test is
       # driven through this step so regressions fail CI.
+      #
+      # We invoke via the explicit 'apps' attribute (defined in
+      # nix/apps.nix) so 'nix run' always picks the writeShellApplication
+      # wrapper (which sets HARVEST_FIXTURES_DIR, cardano-node PATH, and
+      # the groth16-ffi LD_LIBRARY_PATH) — never the raw test binary
+      # from the haskell.nix component, which would be missing those.
       - name: Run unit-tests (hspec) via nix run
-        run: nix run --quiet .#checks.x86_64-linux.unit-tests
+        run: nix run --quiet .#apps.x86_64-linux.unit-tests
 
       # Lint (fourmolu + hlint) is also a shell-app check that must be
       # executed.
       - name: Run lint via nix run
-        run: nix run --quiet .#checks.x86_64-linux.lint
+        run: nix run --quiet .#apps.x86_64-linux.lint
 
