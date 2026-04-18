@@ -1,7 +1,20 @@
-{ pkgs, components, groth16-ffi }:
+{ pkgs, components, groth16-ffi, cardanoNode }:
 {
   library = components.library;
-  unit-tests = components.tests.unit-tests;
+
+  # The unit-tests derivation requires `cardano-node` on PATH because
+  # DevnetSpendSpec spawns a real devnet via `withDevnet` from
+  # cardano-node-clients:devnet. We wrap the checked component in a
+  # shell script that prepends cardano-node to PATH before running the
+  # test binary.
+  unit-tests = pkgs.writeShellApplication {
+    name = "unit-tests";
+    runtimeInputs = [ cardanoNode ];
+    text = ''
+      export LD_LIBRARY_PATH="${groth16-ffi}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      exec ${components.tests.unit-tests}/bin/unit-tests "$@"
+    '';
+  };
 
   lint = pkgs.writeShellApplication {
     name = "lint";

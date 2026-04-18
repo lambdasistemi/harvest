@@ -21,9 +21,12 @@
       url = "github:intersectmbo/cardano-haskell-packages/a46182e9c039737bf43cdb5286df49bbe0edf6fb";
       flake = false;
     };
+    cardano-node = {
+      url = "github:IntersectMBO/cardano-node/10.7.0";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP, mkdocs }:
+  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP, mkdocs, cardano-node }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
@@ -151,9 +154,11 @@
           '';
         };
 
+        cardanoNode = cardano-node.packages.${system}.cardano-node;
+
         # Haskell checks
         hsChecks = import ./nix/checks.nix {
-          inherit pkgs components groth16-ffi;
+          inherit pkgs components groth16-ffi cardanoNode;
         };
 
       in

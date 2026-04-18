@@ -1,10 +1,16 @@
 module Main where
 
+import qualified DevnetSpendSpec
 import qualified E2ESpec
+import qualified Ed25519Spec
 import qualified Groth16Spec
+import qualified SignedDataLayoutSpec
 import Test.Hspec
 
 main :: IO ()
 main = hspec $ do
     Groth16Spec.spec
     E2ESpec.spec
+    SignedDataLayoutSpec.spec
+    Ed25519Spec.spec
+    DevnetSpendSpec.spec

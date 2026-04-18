@@ -59,6 +59,11 @@ test-suite unit-tests
   other-modules:
     Groth16Spec
     E2ESpec
+    Fixtures
+    SignedDataLayout
+    SignedDataLayoutSpec
+    Ed25519Spec
+    DevnetSpendSpec
   build-depends:
     , base
     , harvest
@@ -66,4 +71,6 @@ test-suite unit-tests
     , aeson
     , base16-bytestring
     , cardano-ledger-core
+    , cardano-node-clients
+    , cardano-node-clients:devnet
     , hspec >= 2.0
