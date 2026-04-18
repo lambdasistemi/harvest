@@ -24,13 +24,19 @@ include "lib/eddsa_jubjub.circom";
 ///   - user_id       : Poseidon(user_secret), matches on-chain entry
 ///   - issuer_Ax     : issuer's EdDSA public key (x coordinate)
 ///   - issuer_Ay     : issuer's EdDSA public key (y coordinate)
-///   - acceptor_Ax   : acceptor's EdDSA public key (x coordinate) — shop where spend happens
-///   - acceptor_Ay   : acceptor's EdDSA public key (y coordinate)
+///   - pk_c_hi       : customer's Ed25519 public key, high half (first 16 bytes as BE int)
+///   - pk_c_lo       : customer's Ed25519 public key, low half (last 16 bytes as BE int)
 ///
-/// The acceptor public key is pass-through inside the circuit: no constraint
-/// references it. It is bound into the Groth16 proof as a public input so the
-/// on-chain validator can check the submitting reificator belongs to that shop
-/// (reificator trie lookup — enforced by the validator, not the circuit).
+/// The customer's Ed25519 public key is pass-through inside the circuit: no
+/// constraint references it. It is bound into the Groth16 proof as public
+/// inputs so the on-chain validator can cross-check the redeemer-supplied
+/// customer_pubkey against pk_c_hi||pk_c_lo, preventing an attacker from
+/// pairing a stolen proof with a different customer's signature.
+///
+/// The acceptor's public key is NOT a circuit input. Binding is achieved by
+/// the customer's off-chain Ed25519 signature over signed_data in the
+/// redeemer, verified on-chain by the validator via Plutus's
+/// VerifyEd25519Signature builtin.
 ///
 /// Private inputs (only the user knows):
 ///   - S_old         : old running total of spent tokens
@@ -51,8 +57,8 @@ template VoucherSpend(nBits) {
     signal input user_id;
     signal input issuer_Ax;
     signal input issuer_Ay;
-    signal input acceptor_Ax;
-    signal input acceptor_Ay;
+    signal input pk_c_hi;
+    signal input pk_c_lo;
 
     // --- private inputs ---
     signal input S_old;
@@ -108,4 +114,4 @@ template VoucherSpend(nBits) {
 }
 
 // 32-bit range: caps up to ~4 billion tokens
-component main {public [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]} = VoucherSpend(32);
+component main {public [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]} = VoucherSpend(32);

@@ -29,6 +29,17 @@ pub type VoucherDatum {
 }
 
 /// Redeemer for a spend transaction.
+///
+/// Per-transaction binding for acceptor_pk, TxOutRef, and d is provided by
+/// the customer's Ed25519 signature over `signed_data`, verified on-chain
+/// with the Plutus builtin VerifyEd25519Signature.
+///
+/// `signed_data` canonical byte layout (106 bytes, big-endian):
+///   txid        [32 bytes]   raw Cardano TxId of one consumed input
+///   ix          [ 2 bytes]   u16 output index
+///   acceptor_ax [32 bytes]   acceptor's EdDSA-Jubjub pk x coord
+///   acceptor_ay [32 bytes]   acceptor's EdDSA-Jubjub pk y coord
+///   d           [ 8 bytes]   spend amount
 pub type SpendRedeemer {
   /// The public spend amount
   d: Int,
@@ -38,11 +49,18 @@ pub type SpendRedeemer {
   issuer_ax: Int,
   /// Issuer's EdDSA public key (y coordinate, Jubjub curve)
   issuer_ay: Int,
-  /// Acceptor's EdDSA public key (x coordinate, Jubjub curve)
-  /// — the shop where the spend happens, bound by the Groth16 proof
-  acceptor_ax: Int,
-  /// Acceptor's EdDSA public key (y coordinate, Jubjub curve)
-  acceptor_ay: Int,
+  /// Customer's Ed25519 public key, high half (first 16 bytes as BE int).
+  /// Matches the corresponding Groth16 public input so the validator can
+  /// cross-check it against `customer_pubkey` below.
+  pk_c_hi: Int,
+  /// Customer's Ed25519 public key, low half (last 16 bytes as BE int).
+  pk_c_lo: Int,
+  /// Customer's Ed25519 public key, 32 bytes.
+  customer_pubkey: ByteArray,
+  /// Customer's Ed25519 signature over `signed_data`, 64 bytes.
+  customer_signature: ByteArray,
+  /// Canonical 106-byte payload the customer signed (see layout above).
+  signed_data: ByteArray,
   /// Groth16 proof that the spend is valid
   proof: Groth16Proof,
 }

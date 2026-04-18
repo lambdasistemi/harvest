@@ -42,7 +42,8 @@ vkToData vk =
 
 {- | Encode a spend redeemer as PlutusData.
 Matches Aiken: Constr 0 [Int d, Int commit_spent_new, Int issuer_ax, Int issuer_ay,
-Int acceptor_ax, Int acceptor_ay, Groth16Proof]
+Int pk_c_hi, Int pk_c_lo, Bytes customer_pubkey, Bytes customer_signature,
+Bytes signed_data, Groth16Proof]
 -}
 spendRedeemerToData ::
     Integer ->
@@ -51,19 +52,35 @@ spendRedeemerToData ::
     Integer ->
     Integer ->
     Integer ->
+    ByteString ->
+    ByteString ->
+    ByteString ->
     CompressedProof ->
     PlutusData
-spendRedeemerToData d commitNew issuerAx issuerAy acceptorAx acceptorAy proof =
-    Constr
-        0
-        [ Integer d
-        , Integer commitNew
-        , Integer issuerAx
-        , Integer issuerAy
-        , Integer acceptorAx
-        , Integer acceptorAy
-        , groth16ProofToData proof
-        ]
+spendRedeemerToData
+    d
+    commitNew
+    issuerAx
+    issuerAy
+    pkcHi
+    pkcLo
+    customerPubkey
+    customerSignature
+    signedData
+    proof =
+        Constr
+            0
+            [ Integer d
+            , Integer commitNew
+            , Integer issuerAx
+            , Integer issuerAy
+            , Integer pkcHi
+            , Integer pkcLo
+            , Bytes customerPubkey
+            , Bytes customerSignature
+            , Bytes signedData
+            , groth16ProofToData proof
+            ]
 
 {- | Encode a voucher datum as PlutusData.
 Matches Aiken: Constr 0 [Int user_id, Int commit_spent]
@@ -86,11 +103,35 @@ spendRedeemerToCBOR ::
     Integer ->
     Integer ->
     Integer ->
+    ByteString ->
+    ByteString ->
+    ByteString ->
     CompressedProof ->
     ByteString
-spendRedeemerToCBOR d commitNew issuerAx issuerAy acceptorAx acceptorAy proof =
-    encodePlutusData
-        (spendRedeemerToData d commitNew issuerAx issuerAy acceptorAx acceptorAy proof)
+spendRedeemerToCBOR
+    d
+    commitNew
+    issuerAx
+    issuerAy
+    pkcHi
+    pkcLo
+    customerPubkey
+    customerSignature
+    signedData
+    proof =
+        encodePlutusData
+            ( spendRedeemerToData
+                d
+                commitNew
+                issuerAx
+                issuerAy
+                pkcHi
+                pkcLo
+                customerPubkey
+                customerSignature
+                signedData
+                proof
+            )
 
 voucherDatumToCBOR :: Integer -> Integer -> ByteString
 voucherDatumToCBOR userId commitSpent =

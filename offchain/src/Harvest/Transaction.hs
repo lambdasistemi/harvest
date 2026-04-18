@@ -15,6 +15,7 @@ import Cardano.Node.Client.TxBuild (
     payTo',
     spendScript,
  )
+import Data.ByteString (ByteString)
 import Data.Word (Word32)
 import Harvest.Types (
     Groth16Proof,
@@ -58,10 +59,16 @@ spendVoucher ::
     Integer ->
     -- | issuer_ay (issuer's EdDSA public key, y coordinate)
     Integer ->
-    -- | acceptor_ax (acceptor's EdDSA public key, x coordinate)
+    -- | pk_c_hi (customer Ed25519 pk, first 16 bytes as BE int)
     Integer ->
-    -- | acceptor_ay (acceptor's EdDSA public key, y coordinate)
+    -- | pk_c_lo (customer Ed25519 pk, last 16 bytes as BE int)
     Integer ->
+    -- | customer_pubkey (32-byte Ed25519 compressed pk)
+    ByteString ->
+    -- | customer_signature (64-byte Ed25519 signature over signed_data)
+    ByteString ->
+    -- | signed_data (106-byte canonical payload)
+    ByteString ->
     -- | The ZK proof
     Groth16Proof ->
     -- | (input index, output index)
@@ -77,8 +84,11 @@ spendVoucher
     commitNew
     issuerAx
     issuerAy
-    acceptorAx
-    acceptorAy
+    pkcHi
+    pkcLo
+    customerPubkey
+    customerSignature
+    signedData
     proof = do
         -- Attach the validator script
         attachScript script
@@ -93,8 +103,11 @@ spendVoucher
                     , srCommitSpentNew = commitNew
                     , srIssuerAx = issuerAx
                     , srIssuerAy = issuerAy
-                    , srAcceptorAx = acceptorAx
-                    , srAcceptorAy = acceptorAy
+                    , srPkcHi = pkcHi
+                    , srPkcLo = pkcLo
+                    , srCustomerPubkey = customerPubkey
+                    , srCustomerSignature = customerSignature
+                    , srSignedData = signedData
                     , srProof = proof
                     }
         -- Output back to the script address with updated datum
