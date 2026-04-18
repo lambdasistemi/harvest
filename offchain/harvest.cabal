@@ -66,12 +66,15 @@ test-suite unit-tests
     DevnetSpendSpec
     SpendHarness
     SpendHarnessSpec
+    DevnetEnv
   build-depends:
     , base
     , harvest
     , bytestring
     , aeson
     , base16-bytestring
+    , cardano-ledger-api
+    , cardano-ledger-conway
     , cardano-ledger-core
     , cardano-node-clients
     , cardano-node-clients:devnet

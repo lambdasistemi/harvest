@@ -24,9 +24,19 @@
     cardano-node = {
       url = "github:IntersectMBO/cardano-node/10.7.0";
     };
+    # Devnet genesis files (alonzo/shelley/byron) pinned against the
+    # exact cardano-node-clients commit harvest already consumes in
+    # cabal.project. The flake-input path is purely so we can reuse
+    # upstream's `packages.devnet-genesis`, which copies the genesis
+    # tree into the nix store — the test wrapper then exports it via
+    # E2E_GENESIS_DIR so withDevnet can find it.
+    cardano-node-clients = {
+      url = "github:lambdasistemi/cardano-node-clients/b9fbbb504eaa903c95517f3285a5b048a4a7f537";
+      flake = true;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP, mkdocs, cardano-node }:
+  outputs = { self, nixpkgs, flake-utils, haskellNix, aiken, iohkNix, CHaP, mkdocs, cardano-node, cardano-node-clients }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
@@ -156,9 +166,13 @@
 
         cardanoNode = cardano-node.packages.${system}.cardano-node;
 
+        # Upstream devnet genesis tree. Lives in the nix store; the
+        # unit-tests wrapper exports its path via E2E_GENESIS_DIR.
+        devnetGenesis = cardano-node-clients.packages.${system}.devnet-genesis;
+
         # Haskell checks
         hsChecks = import ./nix/checks.nix {
-          inherit pkgs components groth16-ffi cardanoNode;
+          inherit pkgs components groth16-ffi cardanoNode devnetGenesis;
         };
 
       in

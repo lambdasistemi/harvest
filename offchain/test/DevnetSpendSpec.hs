@@ -55,20 +55,12 @@ enforces.
    the rejection (US2). The test does not match on the error text
    because the ledger may reword it across versions — only the
    'SubmitResult' constructor matters.
-
-== Pending work
-
-The golden-path and four negative scenarios land in T021 and T030–T033
-respectively. This module currently compiles against the new
-cardano-node-clients:devnet public surface and loads the fixture
-bundle, but the actual 'withDevnet' bracket is scaffolded so the
-narrative reads in full while the submit path is iterated on a
-separate commit.
 -}
 module DevnetSpendSpec (spec) where
 
+import DevnetEnv (DevnetEnv (..), withEnv)
 import Fixtures (SpendBundle (..), loadBundle)
-import Test.Hspec (Spec, describe, it, pendingWith, runIO)
+import Test.Hspec (Spec, around, describe, it, pendingWith, runIO, shouldSatisfy)
 
 spec :: Spec
 spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
@@ -76,72 +68,77 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
 
     -- The bundle-load step is a hard runtime check: if the fixture
     -- tree is missing or malformed, every scenario below is moot.
-    -- Surfacing it early keeps the hspec report readable when the
-    -- failure is "no fixtures", not "validator rejected".
     it "loads the fixture bundle cleanly" $
         sbD bundle `seq`
             (pure () :: IO ())
 
-    -- == Golden path (T021, FR-001) ==
-    --
-    -- Narrative: a legitimate customer spends d tokens at an acceptor.
-    -- The customer's phone has already produced the proof and
-    -- signature; the reificator submits. The validator accepts.
-    --
-    -- What this test proves when it passes:
-    --   * The applied validator bytecode (the one that ships on-chain)
-    --     accepts a real submitted tx carrying the fixture bundle.
-    --   * The Haskell tx builder in 'Harvest.Transaction' produces
-    --     bytes the ledger can validate.
-    --   * The three bindings from constitution §V hold together:
-    --     d is bound by the Groth16 public input, acceptor_pk and
-    --     TxOutRef are bound by the Ed25519 signature, and pk_c is
-    --     bound both as a proof public input and via the
-    --     byte-split cross-check.
-    --
-    -- Why it must pass on every commit: this is the single test that
-    -- separates "code compiles" from "a real customer can actually
-    -- spend".
-    it "a customer spends at an acceptor — validator accepts" $
-        pendingWith "T021: devnet bracket lands in follow-up"
+    around withEnv $ do
+        -- == Environment sanity ==
+        --
+        -- First gate on the devnet bracket itself: after 'withDevnet'
+        -- has come up, the genesis address must be funded (this is the
+        -- starting condition for every scenario that follows). If this
+        -- fails, the devnet environment is broken and nothing
+        -- downstream is meaningful.
+        it "devnet comes up with a funded genesis address" $ \env ->
+            deGenesisUtxos env `shouldSatisfy` (not . null)
 
-    -- == Tampered signed_data (T030, FR-002.1) ==
-    --
-    -- The reificator captures the customer's bundle and flips a byte
-    -- inside 'signed_data' before submitting — e.g. in an attempt to
-    -- reroute the payment to a different TxOutRef. Plutus's
-    -- VerifyEd25519Signature builtin rejects because the signature no
-    -- longer matches. The transaction is refused by the node.
-    it "defends against signed_data byte tampering" $
-        pendingWith "T030"
+        -- == Golden path (T021, FR-001) ==
+        --
+        -- Narrative: a legitimate customer spends d tokens at an acceptor.
+        -- The customer's phone has already produced the proof and
+        -- signature; the reificator submits. The validator accepts.
+        --
+        -- What this test proves when it passes:
+        --   * The applied validator bytecode (the one that ships on-chain)
+        --     accepts a real submitted tx carrying the fixture bundle.
+        --   * The Haskell tx builder in 'Harvest.Transaction' produces
+        --     bytes the ledger can validate.
+        --   * The three bindings from constitution §V hold together:
+        --     d is bound by the Groth16 public input, acceptor_pk and
+        --     TxOutRef are bound by the Ed25519 signature, and pk_c is
+        --     bound both as a proof public input and via the
+        --     byte-split cross-check.
+        it "a customer spends at an acceptor — validator accepts" $ \_env ->
+            pendingWith "T021: script deploy + spend submit"
 
-    -- == d cross-check (T031, FR-002.2) ==
-    --
-    -- The customer signed "d = 10". The reificator submits a redeemer
-    -- with "d = 80" (claiming the customer authorised 80 at the
-    -- casher's POS). The validator's defence-in-depth equality check
-    -- 'signed_data.d == redeemer.d' fails. Without this check, the
-    -- reificator could inflate the redeemed amount past what the ZK
-    -- proof actually authorised.
-    it "defends against redeemer.d mismatch with signed_data.d" $
-        pendingWith "T031"
+        -- == Tampered signed_data (T030, FR-002.1) ==
+        --
+        -- The reificator captures the customer's bundle and flips a byte
+        -- inside 'signed_data' before submitting — e.g. in an attempt to
+        -- reroute the payment to a different TxOutRef. Plutus's
+        -- VerifyEd25519Signature builtin rejects because the signature no
+        -- longer matches. The transaction is refused by the node.
+        it "defends against signed_data byte tampering" $ \_env ->
+            pendingWith "T030"
 
-    -- == pk_c split mismatch (T032, FR-002.3) ==
-    --
-    -- Someone captures the customer's proof and tries to pair it with
-    -- a different customer's Ed25519 signature. The validator's
-    -- byte-split check (customer_pubkey[0..16] must match pk_c_hi and
-    -- [16..32] must match pk_c_lo — the proof's public inputs) fails.
-    -- This keeps proofs and signatures from being mixed and matched
-    -- across customers.
-    it "defends against customer-key substitution" $
-        pendingWith "T032"
+        -- == d cross-check (T031, FR-002.2) ==
+        --
+        -- The customer signed "d = 10". The reificator submits a redeemer
+        -- with "d = 80" (claiming the customer authorised 80 at the
+        -- casher's POS). The validator's defence-in-depth equality check
+        -- 'signed_data.d == redeemer.d' fails. Without this check, the
+        -- reificator could inflate the redeemed amount past what the ZK
+        -- proof actually authorised.
+        it "defends against redeemer.d mismatch with signed_data.d" $ \_env ->
+            pendingWith "T031"
 
-    -- == TxOutRef absent (T033, FR-002.4) ==
-    --
-    -- The reificator submits a valid proof + signature but consumes a
-    -- different UTxO than the one named in 'signed_data'. The
-    -- validator's 'signed_data.txOutRef ∈ tx.inputs' check fails,
-    -- preventing replay of a valid bundle into an unrelated tx.
-    it "defends against TxOutRef replay" $
-        pendingWith "T033"
+        -- == pk_c split mismatch (T032, FR-002.3) ==
+        --
+        -- Someone captures the customer's proof and tries to pair it with
+        -- a different customer's Ed25519 signature. The validator's
+        -- byte-split check (customer_pubkey[0..16] must match pk_c_hi and
+        -- [16..32] must match pk_c_lo — the proof's public inputs) fails.
+        -- This keeps proofs and signatures from being mixed and matched
+        -- across customers.
+        it "defends against customer-key substitution" $ \_env ->
+            pendingWith "T032"
+
+        -- == TxOutRef absent (T033, FR-002.4) ==
+        --
+        -- The reificator submits a valid proof + signature but consumes a
+        -- different UTxO than the one named in 'signed_data'. The
+        -- validator's 'signed_data.txOutRef ∈ tx.inputs' check fails,
+        -- preventing replay of a valid bundle into an unrelated tx.
+        it "defends against TxOutRef replay" $ \_env ->
+            pendingWith "T033"
