@@ -27,7 +27,10 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
+import Data.Maybe (fromMaybe)
 import Data.Word (Word16)
+import System.Environment (lookupEnv)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | Everything a spend-bundle test needs.
 data SpendBundle = SpendBundle
@@ -53,8 +56,13 @@ data SpendBundle = SpendBundle
     }
     deriving (Show)
 
+-- | Directory containing the authoritative fixture files. Resolved, in
+-- order: @$HARVEST_FIXTURES_DIR@ if set (used by the nix test wrapper),
+-- otherwise @test/fixtures@ relative to the current working directory
+-- (the cabal-test default when @cabal test@ runs from @offchain/@).
 fixturesDir :: FilePath
-fixturesDir = "test/fixtures"
+fixturesDir = unsafePerformIO $ fromMaybe "test/fixtures" <$> lookupEnv "HARVEST_FIXTURES_DIR"
+{-# NOINLINE fixturesDir #-}
 
 -- | Internal shape of @customer.json@.
 data CustomerFixture = CustomerFixture

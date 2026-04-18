@@ -14,6 +14,7 @@ import Cardano.PlutusData (decodePlutusData, encodePlutusData)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import Fixtures (fixturesDir)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 
 spec :: Spec
@@ -100,14 +101,14 @@ spec = describe "Groth16" $ do
 
 loadProof :: IO SnarkjsProof
 loadProof = do
-    bytes <- LBS.readFile "../circuits/build/proof.json"
+    bytes <- LBS.readFile (fixturesDir <> "/proof.json")
     case Aeson.eitherDecode bytes of
         Right p -> pure p
         Left e -> error ("failed to parse proof.json: " <> e)
 
 loadVK :: IO SnarkjsVK
 loadVK = do
-    bytes <- LBS.readFile "../circuits/build/verification_key.json"
+    bytes <- LBS.readFile (fixturesDir <> "/verification_key.json")
     case Aeson.eitherDecode bytes of
         Right vk -> pure vk
         Left e -> error ("failed to parse verification_key.json: " <> e)

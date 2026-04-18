@@ -19,13 +19,14 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Short as SBS
+import Fixtures (fixturesDir)
 import Harvest.Script (loadScript, scriptAddr)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 
 spec :: Spec
 spec = describe "E2E fixture validation" $ do
     it "loads and parses the applied PlutusV3 script" $ do
-        scriptHex <- BS.readFile "test/fixtures/applied-script.hex"
+        scriptHex <- BS.readFile (fixturesDir <> "/applied-script.hex")
         let Right scriptBytes = Base16.decode scriptHex
             script = loadScript (SBS.toShort scriptBytes)
             addr = scriptAddr Testnet script
@@ -33,7 +34,7 @@ spec = describe "E2E fixture validation" $ do
         show addr `shouldSatisfy` (not . null)
 
     it "compresses proof from fixtures" $ do
-        proofJson <- LBS.readFile "test/fixtures/proof.json"
+        proofJson <- LBS.readFile (fixturesDir <> "/proof.json")
         let Right proof = Aeson.eitherDecode proofJson :: Either String SnarkjsProof
         cp <- compressProof proof
         BS.length (cpA cp) `shouldBe` 48
@@ -41,7 +42,7 @@ spec = describe "E2E fixture validation" $ do
         BS.length (cpC cp) `shouldBe` 48
 
     it "compresses VK from fixtures with 9 IC points" $ do
-        vkJson <- LBS.readFile "test/fixtures/verification_key.json"
+        vkJson <- LBS.readFile (fixturesDir <> "/verification_key.json")
         let Right vk = Aeson.eitherDecode vkJson :: Either String SnarkjsVK
         cvk <- compressVK vk
         length (cvIC cvk) `shouldBe` 9
@@ -49,7 +50,7 @@ spec = describe "E2E fixture validation" $ do
         BS.length (cvBeta cvk) `shouldBe` 96
 
     it "encodes spend redeemer with proof as valid CBOR" $ do
-        proofJson <- LBS.readFile "test/fixtures/proof.json"
+        proofJson <- LBS.readFile (fixturesDir <> "/proof.json")
         let Right proof = Aeson.eitherDecode proofJson :: Either String SnarkjsProof
         cp <- compressProof proof
         let issuerAx = 38027910944389743520483063064820863072988122188084404123017356326968334007437
