@@ -21,8 +21,8 @@ repository cardano-haskell-packages
 source-repository-package
   type: git
   location: https://github.com/lambdasistemi/cardano-node-clients
-  tag: 408a89085fa4b47770a5ee744db8938b32502f5e
-  --sha256: 0n59h8nvcg6avjhck9jb56b2y2gwjcwk7pciyymmg5g8qwg49cp7
+  tag: 18ef6fdc705b37740b1398720924f234e5dd6860
+  --sha256: 04z900hvgqnswgb063sf6ambyj9d9xixwcpyf1jjl600d2f909bf
 
 source-repository-package
   type: git

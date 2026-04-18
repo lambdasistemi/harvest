@@ -54,6 +54,13 @@ data SpendBundle = SpendBundle
     , sbD :: Integer
     , sbPkCHi :: Integer
     , sbPkCLo :: Integer
+    , sbSkC :: ByteString
+    {- ^ 32-byte Ed25519 signing key, used by the devnet test to
+    re-sign signed_data with a live TxOutRef. The production
+    reificator never sees this value — the real customer keeps
+    sk_c on their phone. It lives in the fixture only because the
+    test needs to generate a valid signature at runtime.
+    -}
     }
     deriving (Show)
 
@@ -69,6 +76,7 @@ fixturesDir = unsafePerformIO $ fromMaybe "test/fixtures" <$> lookupEnv "HARVEST
 -- | Internal shape of @customer.json@.
 data CustomerFixture = CustomerFixture
     { cfPkCHex :: String
+    , cfSkCHex :: String
     , cfSignedDataHex :: String
     , cfCustomerSignatureHex :: String
     , cfTxidHex :: String
@@ -81,6 +89,7 @@ instance Aeson.FromJSON CustomerFixture where
     parseJSON = Aeson.withObject "customer" $ \o ->
         CustomerFixture
             <$> o .: "pk_c_hex"
+            <*> o .: "sk_c_hex"
             <*> o .: "signed_data_hex"
             <*> o .: "customer_signature_hex"
             <*> o .: "txid_hex"
@@ -105,6 +114,7 @@ loadBundle = do
             Left e -> fail ("base16 decode failed for fixture field: " <> e)
 
     pkC <- hex (cfPkCHex customer)
+    skC <- hex (cfSkCHex customer)
     sigC <- hex (cfCustomerSignatureHex customer)
     signedData <- hex (cfSignedDataHex customer)
     txid <- hex (cfTxidHex customer)
@@ -123,6 +133,7 @@ loadBundle = do
             , sbD = head (map read publicSignals)
             , sbPkCHi = cfPkCHi customer
             , sbPkCLo = cfPkCLo customer
+            , sbSkC = skC
             }
   where
     readJson :: (Aeson.FromJSON a) => FilePath -> IO a
