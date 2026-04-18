@@ -40,12 +40,6 @@ jobs:
       # wrapper (which sets HARVEST_FIXTURES_DIR, cardano-node PATH, and
       # the groth16-ffi LD_LIBRARY_PATH) — never the raw test binary
       # from the haskell.nix component, which would be missing those.
-      - name: Debug — show the wrapper and its env
-        run: |
-          set -x
-          WRAPPER=$(nix eval --raw .#apps.x86_64-linux.unit-tests.program)
-          echo "wrapper path: $WRAPPER"
-          cat "$WRAPPER"
       - name: Run unit-tests (hspec) via nix run
         run: nix run --quiet .#apps.x86_64-linux.unit-tests
 

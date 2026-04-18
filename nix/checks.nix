@@ -2,16 +2,20 @@
 {
   library = components.library;
 
-  # The unit-tests derivation requires `cardano-node` on PATH because
-  # DevnetSpendSpec spawns a real devnet via `withDevnet` from
-  # cardano-node-clients:devnet. We wrap the checked component in a
-  # shell script that prepends cardano-node to PATH before running the
-  # test binary.
+  # The unit-tests derivation needs:
+  #   - cardano-node on PATH, so DevnetSpendSpec can spawn a devnet via
+  #     withDevnet from cardano-node-clients:devnet;
+  #   - the groth16-ffi shared library on LD_LIBRARY_PATH for the Groth16
+  #     point-compression tests;
+  #   - HARVEST_FIXTURES_DIR pointing at the authoritative fixture tree,
+  #     because the test binary runs from the nix store and can't see the
+  #     repo layout.
   unit-tests = pkgs.writeShellApplication {
     name = "unit-tests";
     runtimeInputs = [ cardanoNode ];
     text = ''
       export LD_LIBRARY_PATH="${groth16-ffi}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      export HARVEST_FIXTURES_DIR="${../offchain/test/fixtures}"
       exec ${components.tests.unit-tests}/bin/unit-tests "$@"
     '';
   };
