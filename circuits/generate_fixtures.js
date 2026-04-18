@@ -4,7 +4,9 @@
 
 const snarkjs = require("snarkjs");
 const fs = require("fs");
+const crypto = require("crypto");
 const { keygen, sign, initPoseidon } = require("./lib/jubjub_eddsa.js");
+const { buildSignedData, splitPkHiLo } = require("./lib/customer_sig.js");
 
 async function main() {
   const outDir = process.argv[2] || "build/fixtures";
@@ -55,6 +57,30 @@ async function main() {
   const commit_old = await poseidonHash([S_old, r_old], "hash2_helper");
   const commit_new = await poseidonHash([S_new, r_new], "hash2_helper");
 
+  // Customer Ed25519 keypair for per-tx authorisation
+  const { publicKey: pkcObj, privateKey: skcObj } =
+    crypto.generateKeyPairSync("ed25519");
+  const pk_c_bytes = pkcObj.export({ type: "spki", format: "der" }).slice(-32);
+  const sk_c_bytes = skcObj
+    .export({ type: "pkcs8", format: "der" })
+    .slice(-32);
+  const { hi: pk_c_hi, lo: pk_c_lo } = splitPkHiLo(pk_c_bytes);
+
+  // Deterministic dummy tx binding for the fixture (tests override in real scenarios)
+  const txid = Buffer.from(
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "hex",
+  );
+  const ix = 0;
+  const signed_data = buildSignedData({
+    txid,
+    ix,
+    acceptor_ax: acceptor.pkx,
+    acceptor_ay: acceptor.pky,
+    d,
+  });
+  const customer_signature = crypto.sign(null, signed_data, skcObj);
+
   const input = {
     d: d.toString(),
     commit_S_old: commit_old,
@@ -62,8 +88,8 @@ async function main() {
     user_id: user_id,
     issuer_Ax: issuer.pkx.toString(),
     issuer_Ay: issuer.pky.toString(),
-    acceptor_Ax: acceptor.pkx.toString(),
-    acceptor_Ay: acceptor.pky.toString(),
+    pk_c_hi: pk_c_hi.toString(),
+    pk_c_lo: pk_c_lo.toString(),
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),
@@ -107,6 +133,18 @@ async function main() {
     sk: acceptor.sk.toString(),
     pkx: acceptor.pkx.toString(),
     pky: acceptor.pky.toString(),
+  }, null, 2));
+
+  // Save customer Ed25519 bundle (raw bytes as hex) and tx binding
+  fs.writeFileSync(`${outDir}/customer.json`, JSON.stringify({
+    pk_c_hex: pk_c_bytes.toString("hex"),
+    sk_c_hex: sk_c_bytes.toString("hex"),
+    pk_c_hi: pk_c_hi.toString(),
+    pk_c_lo: pk_c_lo.toString(),
+    signed_data_hex: signed_data.toString("hex"),
+    customer_signature_hex: customer_signature.toString("hex"),
+    txid_hex: txid.toString("hex"),
+    ix,
   }, null, 2));
 
   console.log("Fixtures generated in", outDir);

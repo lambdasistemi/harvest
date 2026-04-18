@@ -69,9 +69,23 @@ spec = describe "Groth16" $ do
         let commitNew = 28195311164484447918780156773062160077584542861722122307398165012434720062639
             issuerAx = 4704846161580081468346911840983759671196780515436681519191612393768338608159
             issuerAy = 34214411966183820933157791953903973357923378516047256783976067400851897240999
-            acceptorAx = 6983986702542899954628519304086182057889757455360727493320948977468498651684
-            acceptorAy = 11603074077413385000596357033630636871603057286790587959243768465754372931847
-            pd = spendRedeemerToData 10 commitNew issuerAx issuerAy acceptorAx acceptorAy cp
+            pkcHi = 163730017189585948769029599285347051146
+            pkcLo = 115007363968725112145270370819144465957
+            customerPubkey = BS.replicate 32 0x01
+            customerSignature = BS.replicate 64 0x02
+            signedData = BS.replicate 106 0x03
+            pd =
+                spendRedeemerToData
+                    10
+                    commitNew
+                    issuerAx
+                    issuerAy
+                    pkcHi
+                    pkcLo
+                    customerPubkey
+                    customerSignature
+                    signedData
+                    cp
             cbor = encodePlutusData pd
             decoded = decodePlutusData cbor
         decoded `shouldBe` Right pd

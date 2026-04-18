@@ -1,6 +1,8 @@
 const snarkjs = require("snarkjs");
 const fs = require("fs");
+const crypto = require("crypto");
 const { keygen, sign, initPoseidon } = require("./lib/jubjub_eddsa.js");
+const { buildSignedData, splitPkHiLo } = require("./lib/customer_sig.js");
 
 async function main() {
   const zkey = "build/voucher_spend.zkey";
@@ -68,10 +70,33 @@ async function main() {
   console.log("issuer_Ax:", issuer.pkx.toString().substring(0, 20) + "...");
   console.log("issuer_Ay:", issuer.pky.toString().substring(0, 20) + "...");
 
-  // Generate acceptor keypair (pass-through public input — bound by proof, checked by validator)
+  // Generate acceptor keypair (present in signed_data, NOT a circuit public input)
   const acceptor = keygen();
   console.log("acceptor_Ax:", acceptor.pkx.toString().substring(0, 20) + "...");
   console.log("acceptor_Ay:", acceptor.pky.toString().substring(0, 20) + "...");
+
+  // Generate customer Ed25519 keypair (pk_c bound into the proof, sk_c signs signed_data)
+  const { publicKey: pkcObj, privateKey: skcObj } =
+    crypto.generateKeyPairSync("ed25519");
+  const pk_c_bytes = pkcObj.export({ type: "spki", format: "der" }).slice(-32);
+  const { hi: pk_c_hi, lo: pk_c_lo } = splitPkHiLo(pk_c_bytes);
+  console.log("pk_c_hi:", pk_c_hi.toString().substring(0, 20) + "...");
+  console.log("pk_c_lo:", pk_c_lo.toString().substring(0, 20) + "...");
+
+  // Build and sign signed_data = txid || ix || acceptor_ax || acceptor_ay || d
+  const dummyTxid = Buffer.from(
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "hex",
+  );
+  const dummyIx = 0;
+  const signed_data = buildSignedData({
+    txid: dummyTxid,
+    ix: dummyIx,
+    acceptor_ax: acceptor.pkx,
+    acceptor_ay: acceptor.pky,
+    d,
+  });
+  const customer_signature = crypto.sign(null, signed_data, skcObj);
 
   // Certificate message: Poseidon(user_id, cap)
   const certMsg = BigInt(await poseidonHash([BigInt(user_id), C], "hash2_helper"));
@@ -91,8 +116,8 @@ async function main() {
     user_id: user_id,
     issuer_Ax: issuer.pkx.toString(),
     issuer_Ay: issuer.pky.toString(),
-    acceptor_Ax: acceptor.pkx.toString(),
-    acceptor_Ay: acceptor.pky.toString(),
+    pk_c_hi: pk_c_hi.toString(),
+    pk_c_lo: pk_c_lo.toString(),
     S_old: S_old.toString(),
     S_new: S_new.toString(),
     C: C.toString(),

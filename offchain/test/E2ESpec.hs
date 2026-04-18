@@ -54,9 +54,22 @@ spec = describe "E2E fixture validation" $ do
         cp <- compressProof proof
         let issuerAx = 38027910944389743520483063064820863072988122188084404123017356326968334007437
             issuerAy = 42941175320000579223328167288954972786414509136882026862597282785302372595651
-            acceptorAx = 6983986702542899954628519304086182057889757455360727493320948977468498651684
-            acceptorAy = 11603074077413385000596357033630636871603057286790587959243768465754372931847
+            pkcHi = 163730017189585948769029599285347051146
+            pkcLo = 115007363968725112145270370819144465957
+            customerPubkey = BS.replicate 32 0x01
+            customerSignature = BS.replicate 64 0x02
+            signedData = BS.replicate 106 0x03
             redeemer =
-                spendRedeemerToData 10 999 issuerAx issuerAy acceptorAx acceptorAy cp
+                spendRedeemerToData
+                    10
+                    999
+                    issuerAx
+                    issuerAy
+                    pkcHi
+                    pkcLo
+                    customerPubkey
+                    customerSignature
+                    signedData
+                    cp
             cbor = encodePlutusData redeemer
         BS.length cbor `shouldSatisfy` (> 0)

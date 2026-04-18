@@ -1,3 +1,5 @@
+use aiken/crypto
+use aiken/primitive/bytearray
 use cardano/address.{Address}
 use cardano/script_context.{ScriptContext}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction}
@@ -6,13 +8,18 @@ use voucher/types.{SpendRedeemer, VerificationKey, VoucherDatum}
 
 /// Voucher spend validator.
 ///
-/// Verifies a Groth16 proof that:
-///   1. The user knows a secret matching user_id
-///   2. The user holds a valid issuer-signed certificate for this user_id
-///   3. The spend amount d plus the old counter doesn't exceed the cap
-///   4. The committed counters are correctly computed
+/// Two-layer authorisation:
 ///
-/// The supermarket submits the transaction — the user has no wallet.
+///   A. Groth16 proof attests: the customer (who knows user_secret) is
+///      spending `d` against a cap `C` signed by the issuer, with the
+///      commitment chain correctly updated. `pk_c_hi`/`pk_c_lo` are
+///      public inputs so the validator can cross-check them against the
+///      redeemer-supplied `customer_pubkey`.
+///
+///   B. Customer Ed25519 signature over `signed_data` binds this spend to
+///      a specific Cardano tx — specifically one consumed TxOutRef — and
+///      to `acceptor_pk` and `d`. This prevents proof replay across txs
+///      and substitution of acceptor, d, or customer key.
 validator voucher_spend(vk: VerificationKey) {
   spend(
     datum: Option<VoucherDatum>,
@@ -22,9 +29,45 @@ validator voucher_spend(vk: VerificationKey) {
   ) {
     expect Some(voucher) = datum
 
+    // --- Layer B: Ed25519 signature + canonical signed_data parse ---
+
+    // (a) verify the customer's Ed25519 signature
+    expect
+      crypto.verify_ed25519_signature(
+        redeemer.customer_pubkey,
+        redeemer.signed_data,
+        redeemer.customer_signature,
+      )
+
+    // (b) parse signed_data (106-byte layout, see SpendRedeemer doc)
+    //     slice end is inclusive
+    let txid = bytearray.slice(redeemer.signed_data, 0, 31)
+    let ix_bytes = bytearray.slice(redeemer.signed_data, 32, 33)
+    let acceptor_ax_bytes = bytearray.slice(redeemer.signed_data, 34, 65)
+    let acceptor_ay_bytes = bytearray.slice(redeemer.signed_data, 66, 97)
+    let d_bytes = bytearray.slice(redeemer.signed_data, 98, 105)
+
+    let ix = bytearray.to_int_big_endian(ix_bytes)
+    let signed_d = bytearray.to_int_big_endian(d_bytes)
+
+    // (c) defence-in-depth: d in signed_data must match redeemer (and proof)
+    expect signed_d == redeemer.d
+
+    // (d) customer_pubkey must match pk_c_hi / pk_c_lo from the proof
+    let pk_hi_bytes = bytearray.slice(redeemer.customer_pubkey, 0, 15)
+    let pk_lo_bytes = bytearray.slice(redeemer.customer_pubkey, 16, 31)
+    expect bytearray.to_int_big_endian(pk_hi_bytes) == redeemer.pk_c_hi
+    expect bytearray.to_int_big_endian(pk_lo_bytes) == redeemer.pk_c_lo
+
+    // (e) the signed TxOutRef must be consumed in this tx
+    let signed_out_ref = OutputReference { transaction_id: txid, output_index: ix }
+    expect tx_consumes(self.inputs, signed_out_ref)
+
+    // --- Layer A: Groth16 proof verification ---
+
     // Public inputs match the circuit:
     //   [d, commit_S_old, commit_S_new, user_id,
-    //    issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]
+    //    issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]
     let public_inputs =
       [
         redeemer.d,
@@ -33,22 +76,40 @@ validator voucher_spend(vk: VerificationKey) {
         voucher.user_id,
         redeemer.issuer_ax,
         redeemer.issuer_ay,
-        redeemer.acceptor_ax,
-        redeemer.acceptor_ay,
+        redeemer.pk_c_hi,
+        redeemer.pk_c_lo,
       ]
 
-    // Verify the Groth16 proof
     let proof_valid = groth16.verify(vk, redeemer.proof, public_inputs)
 
-    // Check that the output UTXO has the updated commitment
     let output_valid =
       check_output(self, own_ref, voucher.user_id, redeemer.commit_spent_new)
+
+    // We already `expect`-ed the signed_data binding checks above; keep a
+    // reference to the unused parsed acceptor values so the compiler
+    // doesn't strip them out and so future milestones (reificator trie
+    // check) can use them directly.
+    let _ = acceptor_ax_bytes
+    let _ = acceptor_ay_bytes
 
     proof_valid && output_valid
   }
 
   else(_ctx: ScriptContext) {
     False
+  }
+}
+
+/// Check the tx consumes an input matching the given OutputReference.
+fn tx_consumes(inputs: List<Input>, ref: OutputReference) -> Bool {
+  when inputs is {
+    [] -> False
+    [input, ..rest] ->
+      if input.output_reference == ref {
+        True
+      } else {
+        tx_consumes(rest, ref)
+      }
   }
 }
 
