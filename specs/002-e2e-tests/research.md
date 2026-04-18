@@ -79,7 +79,23 @@
 - Shipping cardano-node as a git submodule: unnecessary — it's a standard Cardano dep available in nix.
 - Running the tests without a real node (mock submitter): we lose every property the devnet gives us.
 
+## Audit findings (from T001, 2026-04-18)
+
+Upstream commit audited: `867cb01 Test against Preview node 10.7.0 and align dependencies` on `/code/cardano-node-clients` main.
+
+**Available in public surface (no patch needed)**:
+- `Cardano.Node.Client.E2E.Setup` (in `:devnet` sub-library): `withDevnet`, `mkSignKey`, `keyHashFromSignKey`, `enterpriseAddr`, `addKeyWitness`, `genesisSignKey`, `genesisAddr`, `devnetMagic`, `genesisDir`.
+- `Cardano.Node.Client.Submitter` (main library): `Submitter`, `SubmitResult (Submitted TxId | Rejected ByteString)`, `submitTx`. The `SubmitResult` sum type gives us exactly the accept/reject observable FR-007 calls for.
+- `Cardano.Node.Client.Provider`: `Provider`, `queryUTxOs`, `EvaluateTxResult`.
+- `Cardano.Node.Client.Evaluate`: `evaluateAndBalance`.
+- `Cardano.Node.Client.TxBuild`: already used by `Harvest.Transaction`.
+- `Cardano.Node.Client.E2E.ChainPopulator` (in `:devnet`): funding helpers.
+
+**Missing from public surface (patch needed)**:
+- `verifyDSIGN`, `VerKeyDSIGN Ed25519DSIGN`, `SigDSIGN Ed25519DSIGN`, and the raw-byte deserializers (`rawDeserialiseVerKeyDSIGN`, `rawDeserialiseSigDSIGN`) are NOT re-exported from `Cardano.Node.Client.E2E.Setup`. They live in `cardano-crypto-class` and are imported internally by `Setup.hs` but not part of its export list.
+
+**Patch decision (T006 required)**: extend `Cardano.Node.Client.E2E.Setup`'s export list with an `-- * Ed25519 verification` section that re-exports `verifyDSIGN`, `VerKeyDSIGN`, `SigDSIGN`, `rawDeserialiseVerKeyDSIGN`, `rawDeserialiseSigDSIGN`, `Ed25519DSIGN`, and `SignKeyDSIGN` (some already public via imports re-exports; we make it explicit). Zero logic change, only re-exports. Targets `Cardano.Node.Client.E2E.Setup` because (a) it's public, (b) the Ed25519 key primitives already live there, (c) adding a verify section is the natural grouping.
+
 ## Open items
 
-- Exact re-export path in `cardano-node-clients` for the Ed25519 verify primitive — confirmed during Phase 2 implementation. If the current public surface suffices (e.g. `Cardano.Node.Client.E2E.Setup` exposes enough), no upstream patch is needed and D4 is a no-op.
-- Whether harvest's tx builder needs adjustment for the devnet scenario (no adjustment anticipated — `spendVoucher` in `Harvest.Transaction` already uses the shared `TxBuild` DSL).
+- Whether harvest's tx builder needs adjustment for the devnet scenario: no adjustment anticipated — `spendVoucher` in `Harvest.Transaction` already uses the shared `TxBuild` DSL. Will confirm when integrating in T020.
