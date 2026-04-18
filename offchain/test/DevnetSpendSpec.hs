@@ -1,7 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
-
 {- |
 Module      : DevnetSpendSpec
 Description : End-to-end documentation of a voucher spend (FR-001, FR-002).
@@ -83,7 +79,8 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
     -- Surfacing it early keeps the hspec report readable when the
     -- failure is "no fixtures", not "validator rejected".
     it "loads the fixture bundle cleanly" $
-        sbD bundle `seq` (pure () :: IO ())
+        sbD bundle `seq`
+            (pure () :: IO ())
 
     -- == Golden path (T021, FR-001) ==
     --

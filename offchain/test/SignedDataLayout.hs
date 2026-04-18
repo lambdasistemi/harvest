@@ -76,8 +76,9 @@ data ParsedSignedData = ParsedSignedData
     }
     deriving (Eq, Show)
 
--- | Parse the canonical byte layout.
--- Fails if the input is not exactly 'signedDataSize' bytes.
+{- | Parse the canonical byte layout.
+Fails if the input is not exactly 'signedDataSize' bytes.
+-}
 parseSignedData :: ByteString -> Either String ParsedSignedData
 parseSignedData bs
     | BS.length bs /= signedDataSize =
