@@ -2,7 +2,7 @@
 let
   project = pkgs.haskell-nix.cabalProject' {
     src = ../offchain;
-    compiler-nix-name = "ghc984";
+    compiler-nix-name = "ghc9122";
     inputMap = {
       "https://chap.intersectmbo.org/" = CHaP;
     };
