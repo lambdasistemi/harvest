@@ -20,26 +20,25 @@ jobs:
         with:
           name: paolino
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Build all derivations
+      # Derivations whose tests run during the build phase
+      # (cargo test, npm test, aiken check, haskell library build).
+      - name: Build derivation-backed checks
         run: >-
           nix build --quiet --no-link
           .#checks.x86_64-linux.library
-          .#checks.x86_64-linux.unit-tests
           .#checks.x86_64-linux.groth16-ffi
           .#checks.x86_64-linux.circuit
           .#checks.x86_64-linux.circuit-tests
-          .#checks.x86_64-linux.lint
           .#checks.x86_64-linux.aiken-check
 
-  lint:
-    name: Lint
-    needs: build-gate
-    runs-on: nixos
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/cachix-action@v15
-        with:
-          name: paolino
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Fourmolu + HLint
-        run: nix run .#lint --quiet
+      # Shell-app checks must be *executed*, not just built, so the
+      # underlying test binary actually runs. Every new E2E test is
+      # driven through this step so regressions fail CI.
+      - name: Run unit-tests (hspec) via nix run
+        run: nix run --quiet .#checks.x86_64-linux.unit-tests
+
+      # Lint (fourmolu + hlint) is also a shell-app check that must be
+      # executed.
+      - name: Run lint via nix run
+        run: nix run --quiet .#checks.x86_64-linux.lint
+

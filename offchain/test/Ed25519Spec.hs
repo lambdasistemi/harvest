@@ -26,8 +26,8 @@ import Cardano.Node.Client.E2E.Setup (
     rawDeserialiseVerKeyDSIGN,
     verifyDSIGN,
  )
-import qualified Data.ByteString as BS
 import Data.Bits (xor)
+import qualified Data.ByteString as BS
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import Fixtures (SpendBundle (..), loadBundle)
@@ -38,14 +38,16 @@ spec = describe "Ed25519 independent verifier (FR-003)" $ do
     bundle <- runIO loadBundle
 
     let vk :: VerKeyDSIGN Ed25519DSIGN
-        vk = fromMaybe
-            (error "rawDeserialiseVerKeyDSIGN failed on customer_pubkey")
-            (rawDeserialiseVerKeyDSIGN (sbCustomerPubkey bundle))
+        vk =
+            fromMaybe
+                (error "rawDeserialiseVerKeyDSIGN failed on customer_pubkey")
+                (rawDeserialiseVerKeyDSIGN (sbCustomerPubkey bundle))
 
         sig :: SigDSIGN Ed25519DSIGN
-        sig = fromMaybe
-            (error "rawDeserialiseSigDSIGN failed on customer_signature")
-            (rawDeserialiseSigDSIGN (sbCustomerSignature bundle))
+        sig =
+            fromMaybe
+                (error "rawDeserialiseSigDSIGN failed on customer_signature")
+                (rawDeserialiseSigDSIGN (sbCustomerSignature bundle))
 
     it "customer_pubkey is 32 bytes" $
         BS.length (sbCustomerPubkey bundle) `shouldBe` 32

@@ -21,8 +21,8 @@ module Fixtures (
 
 import Cardano.Groth16.Compress (compressProof, compressVK)
 import Cardano.Groth16.Types (CompressedProof (..), CompressedVK (..), SnarkjsProof, SnarkjsVK)
-import qualified Data.Aeson as Aeson
 import Data.Aeson ((.:))
+import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Char8 as BS8
@@ -37,9 +37,10 @@ data SpendBundle = SpendBundle
     { sbProof :: CompressedProof
     , sbVK :: CompressedVK
     , sbPublicInputs :: [Integer]
-    -- ^ In the circuit's public-input order:
-    -- [d, commit_S_old, commit_S_new, user_id,
-    --  issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]
+    {- ^ In the circuit's public-input order:
+    [d, commit_S_old, commit_S_new, user_id,
+    issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]
+    -}
     , sbAppliedScriptHex :: ByteString
     , sbCustomerPubkey :: ByteString
     -- ^ 32 bytes
@@ -56,10 +57,11 @@ data SpendBundle = SpendBundle
     }
     deriving (Show)
 
--- | Directory containing the authoritative fixture files. Resolved, in
--- order: @$HARVEST_FIXTURES_DIR@ if set (used by the nix test wrapper),
--- otherwise @test/fixtures@ relative to the current working directory
--- (the cabal-test default when @cabal test@ runs from @offchain/@).
+{- | Directory containing the authoritative fixture files. Resolved, in
+order: @$HARVEST_FIXTURES_DIR@ if set (used by the nix test wrapper),
+otherwise @test/fixtures@ relative to the current working directory
+(the cabal-test default when @cabal test@ runs from @offchain/@).
+-}
 fixturesDir :: FilePath
 fixturesDir = unsafePerformIO $ fromMaybe "test/fixtures" <$> lookupEnv "HARVEST_FIXTURES_DIR"
 {-# NOINLINE fixturesDir #-}
