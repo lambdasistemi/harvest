@@ -64,35 +64,36 @@ Operations where **authorization** is needed but nothing is hidden.
 
 ## Attack Analysis
 
-### Double spend
+### Double spend / proof replay
 
-**Attack**: Customer presents the same spend proof to two different reificators simultaneously.
+**Attack**: Reificator submits the same proof in a second transaction.
 
-**Defense**: The ZK proof binds the acceptor's public key (the `shop_pk` of the shop where the spend happens). Each proof targets one acceptor. The on-chain validator checks the submitting reificator belongs to that shop. Two different acceptors = two different proofs needed = two different counter updates.
-
-```mermaid
-graph TD
-    PROOF["Proof: d=10, acceptor=B"] -->|submit via B's reificator| OK[Valid]
-    PROOF -->|submit via C's reificator| FAIL[Rejected: reificator not under shop B]
-```
+**Defense**: The customer's Ed25519 signature in the redeemer covers a specific `TxOutRef` the reificator consumes in this transaction. A TxOutRef can be consumed at most once on-chain — the second submission has no matching unspent input, and the validator rejects. The circuit's commitment chain (`commit_S_old` must match the current on-chain value) adds a second layer: after one successful spend, `commit_S_old` has moved forward and the proof no longer validates against the datum.
 
 ### Amount tampering
 
 **Attack**: Reificator changes the spend amount `d` before submitting.
 
-**Defense**: `d` is a public input to the ZK proof. Changing `d` invalidates the proof. The on-chain Groth16 verifier rejects it.
+**Defense**: `d` is a public input to the ZK proof. Changing `d` invalidates the proof. The redeemer additionally cross-checks `signed_data.d == redeemer.d` against the customer's Ed25519 signature.
 
-### Certificate replay
+### Acceptor misdirection
 
-**Attack**: Customer presents the same reification certificate twice.
+**Attack**: Reificator from acceptor A submits a proof intended for acceptor B.
 
-**Defense**: Each certificate carries a nonce. The nonce maps to a pending trie entry on-chain. On first redemption, the entry is removed. On second presentation, the Merkle membership proof fails — the nonce is no longer in the trie.
+**Defense**: The customer's Ed25519 signature covers `acceptor_pk` inside `signed_data`. Changing `acceptor_pk` invalidates the signature. The validator also checks (milestone 2) that the submitting reificator is registered under `signed_data.acceptor_pk` in the reificator trie.
 
-### Shop misdirection
+```mermaid
+graph TD
+    PROOF["Signed: d=10, acceptor=B, TxOutRef=X"] -->|submit via B's reificator consuming X| OK[Valid]
+    PROOF -->|submit via C's reificator| FAIL[Rejected: reificator not under acceptor B]
+    PROOF -->|change d to 50| FAIL2[Rejected: Ed25519 signature invalid]
+```
 
-**Attack**: Reificator from shop A submits a proof intended for shop B.
+### Customer-key substitution
 
-**Defense**: The proof includes the `acceptor_pk` (the spending shop's `shop_pk`) as a public input. The validator checks the reificator trie: is this `reificator_pk` registered under `acceptor_pk`? If not, the transaction is rejected.
+**Attack**: Reificator captures a customer's proof and signs a redeemer with a different customer key.
+
+**Defense**: The customer's `pk_c` is a pass-through public input to the Groth16 proof (`pk_c_hi`, `pk_c_lo`). The validator cross-checks the redeemer's `customer_pubkey` matches the proof's `pk_c` inputs. Substituting a different customer key invalidates the proof.
 
 ### Stolen reificator
 
@@ -163,7 +164,7 @@ graph LR
 
 | Observer | Learns | Does not learn |
 |----------|--------|---------------|
-| On-chain observer | `d`, `user_id`, `issuer_pk`, `acceptor_pk`, `commit(spent)` | Cap, actual spent total, balance, user identity |
+| On-chain observer | `d`, `user_id`, `issuer_pk`, `acceptor_pk` (via signed_data), `commit(spent)`, `pk_c` | Cap only; `S_old`/`S_new` are derivable by aggregating public `d` values |
 | Issuer (shop that signed the cap) | Cap they signed, user_id | Other shops' caps, total spent, when/where redeemed |
 | Acceptor (shop where the spend happens) | Amount `d` being redeemed | Cap, total spent, which shop issued the certificate |
 | Data provider | Trie structure, entry existence | Nothing beyond what's on-chain |

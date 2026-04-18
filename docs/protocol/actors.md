@@ -87,6 +87,7 @@ Anonymous. No registration, no identity beyond `Poseidon(user_secret)`.
 | Holds (on phone) | Purpose |
 |-------------------|---------|
 | `user_secret` | Proves identity in ZK proofs |
+| Ed25519 keypair (`sk_c`, `pk_c`) | Signs per-tx authorisation (`acceptor_pk`, TxOutRef, `d`) for the validator's Ed25519 check |
 | Spend randomness (`r_old`, `r_new`) | Opens commitments |
 | Cap certificates (per shop) | Proves spending allowance |
 | Reification certificates (per spend) | Redeems at cashing points |

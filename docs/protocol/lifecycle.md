@@ -70,14 +70,16 @@ sequenceDiagram
     participant M as MPFS
     participant L1 as On-Chain
 
-    Note over P: user chooses:<br/>d=3, shop=B, certificate from A (cap=5)
-    P->>P: generate ZK proof<br/>binds: d=3, shop_B_pk, issuer_A_pk<br/>proves: 0 + 3 ≤ 5
-    P->>R: ZK proof
+    Note over P: user chooses:<br/>d=3, acceptor=B, certificate from A (cap=5)
+    R->>P: proposed TxOutRef to consume (as tx nonce)
+    P->>P: generate ZK proof<br/>binds: d=3, pk_c, issuer_A_pk<br/>proves: 0 + 3 ≤ 5
+    P->>P: Ed25519 sign signed_data =<br/>(TxOutRef, acceptor_B_pk, d=3)
+    P->>R: ZK proof + pk_c + signature + signed_data
     R->>DP: Merkle proof for user_id in spend trie?
     DP->>R: non-membership proof (first spend)
-    R->>M: settlement request
+    R->>M: settlement request (tx consuming the committed TxOutRef)
     M->>L1: settlement tx
-    Note over L1: validator checks:<br/>1. ZK proof valid<br/>2. non-membership → s_old=0 accepted<br/>3. reificator_pk is under shop_B_pk<br/>4. issuer_A_pk is a registered shop
+    Note over L1: validator checks:<br/>1. Ed25519.verify(pk_c, signed_data, sig)<br/>2. signed_data.TxOutRef ∈ tx.inputs<br/>3. signed_data.d == redeemer.d<br/>4. customer_pubkey matches proof's pk_c inputs<br/>5. ZK proof valid<br/>6. non-membership → s_old=0 accepted<br/>7. reificator is under signed_data.acceptor_pk
     L1->>L1: spend trie: insert (issuer_A, user_id) → commit(3)
     L1->>L1: pending trie: insert (reificator_pk, nonce) → {user_id, 3}
     R->>P: reification certificate (nonce, d=3)

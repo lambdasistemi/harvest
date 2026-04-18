@@ -26,16 +26,21 @@ User balances and voucher caps are never revealed on-chain. All on-chain data is
 
 ### V. Proof Soundness
 
-No spend occurs without a valid Groth16 proof that the committed counter has not exceeded the hidden cap. The proof binds two choices the customer makes:
+No spend occurs without (a) a valid Groth16 proof that the committed counter has not exceeded the hidden cap, and (b) a customer Ed25519 signature binding the spend to a specific Cardano transaction.
 
-1. **Spend amount `d`** — the customer authorizes the exact amount. No party can alter it without invalidating the proof.
-2. **Acceptor `acceptor_pk`** — the customer chooses the spending shop (acceptor). The on-chain validator enforces that the submitting reificator belongs to this shop (checked against the reificator trie).
+Three bindings, split between the proof and the signature:
 
-The issuer (shop that signed the cap certificate) and the acceptor (shop where the spend happens) are role labels on coalition members, not separate actor types. Both are shops. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the reificator belongs to the chosen acceptor.
+1. **Spend amount `d`** — Groth16 public input. Bound by the circuit constraint `S_new = S_old + d`. The customer's Ed25519 signature over `signed_data` cross-includes `d` for defence-in-depth.
+2. **Acceptor `acceptor_pk`** — part of `signed_data` (not a circuit public input). Bound by the customer's Ed25519 signature. The on-chain validator enforces that the submitting reificator belongs to `signed_data.acceptor_pk` (reificator trie).
+3. **Transaction identity** — the `TxOutRef` the reificator consumes is part of `signed_data` and bound by the Ed25519 signature. A TxOutRef is consumed at most once on-chain, so the signed redeemer can be submitted at most once. This replaces the earlier (abandoned) circuit-level nonce design.
 
-Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, acceptor_Ax, acceptor_Ay]`
+The customer's Ed25519 public key `pk_c` is itself a pass-through public input to the circuit (split as `pk_c_hi`, `pk_c_lo`) — the validator cross-checks it against the redeemer's `customer_pubkey`, preventing an attacker from pairing a stolen proof with a different customer key.
 
-A single Groth16 circuit handles everything: issuer signature verification, counter arithmetic, range check, commitment binding, and acceptor binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
+The issuer (shop that signed the cap certificate) and the acceptor (shop where the spend happens) are role labels on coalition members, not separate actor types. Both are shops. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the customer's Ed25519 signature and that the reificator belongs to the chosen acceptor.
+
+Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]`
+
+A single Groth16 circuit handles issuer signature verification, counter arithmetic, range check, and commitment binding. The customer signature handles per-tx binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
 
 ### VI. Monotonic State
 
