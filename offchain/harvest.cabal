@@ -67,6 +67,7 @@ test-suite unit-tests
     SpendHarness
     SpendHarnessSpec
     DevnetEnv
+    SpendSetup
   build-depends:
     , base
     , harvest
@@ -76,6 +77,9 @@ test-suite unit-tests
     , cardano-ledger-api
     , cardano-ledger-conway
     , cardano-ledger-core
+    , cardano-ledger-mary
     , cardano-node-clients
     , cardano-node-clients:devnet
+    , containers
     , hspec >= 2.0
+    , microlens
