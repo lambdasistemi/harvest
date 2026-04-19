@@ -89,13 +89,21 @@ data NoQ a
     deriving ()
 
 {- | What the setup transaction left behind on-chain: the two
-'TxOutRef's the spend scenario is going to consume.
+'TxOutRef's the spend scenario is going to consume, plus the
+reified script address so tests can assert outputs landed there.
 -}
 data DeployedSpend = DeployedSpend
     { dsScriptTxIn :: TxIn
     , dsScriptTxOut :: TxOut ConwayEra
+    , dsScriptAddr :: Addr
     , dsReificatorTxIn :: TxIn
     , dsReificatorTxOut :: TxOut ConwayEra
+    , dsReificatorPay :: Coin
+    {- ^ Value the setup tx paid to the reificator — exposed so tests
+    can cross-check the funding amount.
+    -}
+    , dsScriptPay :: Coin
+    -- ^ Value locked at the script address in the VoucherDatum UTxO.
     }
 
 {- | Submit the setup tx and wait for the two outputs to appear.
@@ -188,8 +196,11 @@ deploySpendState env bundle = do
         DeployedSpend
             { dsScriptTxIn = scriptIn
             , dsScriptTxOut = scriptOut
+            , dsScriptAddr = scriptAddress
             , dsReificatorTxIn = reifIn
             , dsReificatorTxOut = reifOut
+            , dsReificatorPay = reificatorPay
+            , dsScriptPay = scriptPay
             }
   where
     pickOne :: String -> Coin -> [(TxIn, TxOut ConwayEra)] -> IO (TxIn, TxOut ConwayEra)

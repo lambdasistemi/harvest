@@ -58,10 +58,23 @@ enforces.
 -}
 module DevnetSpendSpec (spec) where
 
+import Cardano.Ledger.Api.Scripts.Data (Datum (NoDatum))
+import Cardano.Ledger.Api.Tx.Out (addrTxOutL, coinTxOutL, datumTxOutL)
 import DevnetEnv (DevnetEnv (..), withEnv)
 import Fixtures (SpendBundle (..), loadBundle)
+import Lens.Micro ((^.))
 import SpendSetup (DeployedSpend (..), deploySpendState)
-import Test.Hspec (Spec, around, describe, it, pendingWith, runIO, shouldSatisfy)
+import Test.Hspec (
+    Spec,
+    around,
+    describe,
+    it,
+    pendingWith,
+    runIO,
+    shouldBe,
+    shouldNotBe,
+    shouldSatisfy,
+ )
 
 spec :: Spec
 spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
@@ -102,12 +115,28 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         --     byte-split cross-check.
         -- The deploy step lands a script UTxO at the voucher address
         -- carrying the initial VoucherDatum AND funds the reificator
-        -- so it can pay for the spend tx. Both outputs come from one
-        -- transaction, so success means both materialise.
+        -- so it can pay for the spend tx. The assertions below are
+        -- load-bearing: each one fails if the setup tx produced the
+        -- wrong address, wrong amount, or a missing inline datum.
         it "deploys the voucher script UTxO and funds the reificator" $ \env -> do
-            deployed <- deploySpendState env bundle
-            -- Both outputs must be distinct and present.
-            dsScriptTxIn deployed `shouldSatisfy` (/= dsReificatorTxIn deployed)
+            d <- deploySpendState env bundle
+
+            -- The script output must sit at the applied validator's
+            -- address. If it doesn't, future spend scripts will never
+            -- be invoked and the whole E2E path is vacuous.
+            (dsScriptTxOut d ^. addrTxOutL) `shouldBe` dsScriptAddr d
+
+            -- And carry the value we paid it.
+            (dsScriptTxOut d ^. coinTxOutL) `shouldBe` dsScriptPay d
+
+            -- And carry an inline datum (not NoDatum) — otherwise the
+            -- validator has nothing to read user_id / commit_spent from.
+            (dsScriptTxOut d ^. datumTxOutL) `shouldNotBe` NoDatum
+
+            -- The reificator output is tied to the reificator
+            -- address and the declared funding amount.
+            (dsReificatorTxOut d ^. addrTxOutL) `shouldBe` deReificatorAddr env
+            (dsReificatorTxOut d ^. coinTxOutL) `shouldBe` dsReificatorPay d
 
         it "a customer spends at an acceptor — validator accepts" $ \_env ->
             pendingWith "T021: spend tx submit once harness + re-sign land"
