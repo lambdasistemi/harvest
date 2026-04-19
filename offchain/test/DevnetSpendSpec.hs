@@ -60,6 +60,7 @@ module DevnetSpendSpec (spec) where
 
 import DevnetEnv (DevnetEnv (..), withEnv)
 import Fixtures (SpendBundle (..), loadBundle)
+import SpendSetup (DeployedSpend (..), deploySpendState)
 import Test.Hspec (Spec, around, describe, it, pendingWith, runIO, shouldSatisfy)
 
 spec :: Spec
@@ -99,8 +100,17 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         --     TxOutRef are bound by the Ed25519 signature, and pk_c is
         --     bound both as a proof public input and via the
         --     byte-split cross-check.
+        -- The deploy step lands a script UTxO at the voucher address
+        -- carrying the initial VoucherDatum AND funds the reificator
+        -- so it can pay for the spend tx. Both outputs come from one
+        -- transaction, so success means both materialise.
+        it "deploys the voucher script UTxO and funds the reificator" $ \env -> do
+            deployed <- deploySpendState env bundle
+            -- Both outputs must be distinct and present.
+            dsScriptTxIn deployed `shouldSatisfy` (/= dsReificatorTxIn deployed)
+
         it "a customer spends at an acceptor — validator accepts" $ \_env ->
-            pendingWith "T021: script deploy + spend submit"
+            pendingWith "T021: spend tx submit once harness + re-sign land"
 
         -- == Tampered signed_data (T030, FR-002.1) ==
         --
