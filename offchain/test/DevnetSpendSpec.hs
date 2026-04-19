@@ -61,10 +61,14 @@ module DevnetSpendSpec (spec) where
 import Cardano.Ledger.Api.Scripts.Data (Datum (NoDatum))
 import Cardano.Ledger.Api.Tx.Out (addrTxOutL, coinTxOutL, datumTxOutL)
 import Cardano.Node.Client.Submitter (SubmitResult (..))
+import Data.Bits (xor)
+import qualified Data.ByteString as BS
+import Data.Word (Word8)
 import DevnetEnv (DevnetEnv (..), withEnv)
 import Fixtures (SpendBundle (..), loadBundle)
 import Lens.Micro ((^.))
-import SpendScenario (identityMutations, submitSpend)
+import SignedDataLayout (offsetAcceptorAy)
+import SpendScenario (Mutations (..), identityMutations, submitSpend)
 import SpendSetup (DeployedSpend (..), deploySpendState)
 import Test.Hspec (
     Spec,
@@ -72,7 +76,6 @@ import Test.Hspec (
     describe,
     expectationFailure,
     it,
-    pendingWith,
     runIO,
     shouldBe,
     shouldNotBe,
@@ -164,40 +167,93 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- == Tampered signed_data (T030, FR-002.1) ==
         --
         -- The reificator captures the customer's bundle and flips a byte
-        -- inside 'signed_data' before submitting — e.g. in an attempt to
-        -- reroute the payment to a different TxOutRef. Plutus's
-        -- VerifyEd25519Signature builtin rejects because the signature no
-        -- longer matches. The transaction is refused by the node.
-        it "defends against signed_data byte tampering" $ \_env ->
-            pendingWith "T030"
+        -- inside 'signed_data' AFTER the customer has signed it — the
+        -- mutation runs through 'mSignedData', which the scenario applies
+        -- post-re-sign. Plutus's VerifyEd25519Signature builtin then
+        -- rejects because the signature no longer covers the byte that
+        -- was flipped.
+        it "defends against signed_data byte tampering" $ \env -> do
+            deployed <- deploySpendState env bundle
+            let muts =
+                    identityMutations
+                        { mSignedData = flipByteAt offsetAcceptorAy
+                        }
+            result <- submitSpend env bundle deployed muts
+            result `shouldSatisfy` isRejected
 
         -- == d cross-check (T031, FR-002.2) ==
         --
         -- The customer signed "d = 10". The reificator submits a redeemer
-        -- with "d = 80" (claiming the customer authorised 80 at the
-        -- casher's POS). The validator's defence-in-depth equality check
-        -- 'signed_data.d == redeemer.d' fails. Without this check, the
-        -- reificator could inflate the redeemed amount past what the ZK
-        -- proof actually authorised.
-        it "defends against redeemer.d mismatch with signed_data.d" $ \_env ->
-            pendingWith "T031"
+        -- with "d = 80" — the mutation rewrites only the bundle's 'sbD'
+        -- field (which feeds the redeemer) without touching 'sbSignedData',
+        -- so the re-signed @signed_data.d@ still reads 10. The validator's
+        -- defence-in-depth equality check 'signed_data.d == redeemer.d'
+        -- fails. Without this check, the reificator could inflate the
+        -- redeemed amount past what the ZK proof actually authorised.
+        it "defends against redeemer.d mismatch with signed_data.d" $ \env -> do
+            deployed <- deploySpendState env bundle
+            let muts =
+                    identityMutations
+                        { mBundle = \b -> b{sbD = sbD b + 1}
+                        }
+            result <- submitSpend env bundle deployed muts
+            result `shouldSatisfy` isRejected
 
         -- == pk_c split mismatch (T032, FR-002.3) ==
         --
         -- Someone captures the customer's proof and tries to pair it with
-        -- a different customer's Ed25519 signature. The validator's
-        -- byte-split check (customer_pubkey[0..16] must match pk_c_hi and
-        -- [16..32] must match pk_c_lo — the proof's public inputs) fails.
-        -- This keeps proofs and signatures from being mixed and matched
-        -- across customers.
-        it "defends against customer-key substitution" $ \_env ->
-            pendingWith "T032"
+        -- a different customer's public key. The mutation flips a byte in
+        -- 'sbCustomerPubkey' (the redeemer's customer_pubkey); the proof's
+        -- pk_c_hi / pk_c_lo public inputs are untouched. The validator's
+        -- byte-split check (customer_pubkey[0..16] must equal pk_c_hi and
+        -- [16..32] must equal pk_c_lo) fails. This keeps proofs and
+        -- signatures from being mixed and matched across customers.
+        it "defends against customer-key substitution" $ \env -> do
+            deployed <- deploySpendState env bundle
+            let muts =
+                    identityMutations
+                        { mBundle = \b ->
+                            b{sbCustomerPubkey = flipByteAt 0 (sbCustomerPubkey b)}
+                        }
+            result <- submitSpend env bundle deployed muts
+            result `shouldSatisfy` isRejected
 
         -- == TxOutRef absent (T033, FR-002.4) ==
         --
-        -- The reificator submits a valid proof + signature but consumes a
-        -- different UTxO than the one named in 'signed_data'. The
-        -- validator's 'signed_data.txOutRef ∈ tx.inputs' check fails,
-        -- preventing replay of a valid bundle into an unrelated tx.
-        it "defends against TxOutRef replay" $ \_env ->
-            pendingWith "T033"
+        -- The reificator submits a valid proof + signature but 'signed_data'
+        -- names a UTxO that the tx does not actually consume. The mutation
+        -- overrides the 'txid' bound into 'signed_data' with a fabricated
+        -- 32-byte value; the re-sign covers that bogus binding, so the
+        -- Ed25519 check passes. The validator's
+        -- 'signed_data.txOutRef ∈ tx.inputs' check then fails, preventing
+        -- replay of a valid bundle into an unrelated tx.
+        it "defends against TxOutRef replay" $ \env -> do
+            deployed <- deploySpendState env bundle
+            let muts =
+                    identityMutations
+                        { mLiveTxid = const (BS.replicate 32 0xAA)
+                        }
+            result <- submitSpend env bundle deployed muts
+            result `shouldSatisfy` isRejected
+
+{- | Flip a single byte of a 'BS.ByteString' at the given offset. Used
+by the negative scenarios to corrupt exactly one byte without
+changing the length.
+-}
+flipByteAt :: Int -> BS.ByteString -> BS.ByteString
+flipByteAt i bs
+    | i < 0 || i >= BS.length bs =
+        error ("flipByteAt: out-of-range offset " <> show i)
+    | otherwise =
+        let (before, rest) = BS.splitAt i bs
+            b :: Word8
+            b = BS.head rest
+         in before <> BS.cons (b `xor` 0xFF) (BS.drop 1 rest)
+
+{- | True iff the node rejected the tx. Any rejection constructor counts;
+negative tests don't pin the error text because ledger versions
+reword it.
+-}
+isRejected :: SubmitResult -> Bool
+isRejected (Rejected _) = True
+isRejected _ = False
