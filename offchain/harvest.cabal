@@ -89,4 +89,6 @@ test-suite unit-tests
     , containers
     , hspec >= 2.0
     , microlens
+    , plutus-core
     , plutus-tx
+    , serialise
