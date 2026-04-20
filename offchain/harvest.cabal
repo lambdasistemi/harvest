@@ -16,6 +16,7 @@ library
     Cardano.Groth16.Compress
     Cardano.Groth16.Serialize
     Cardano.Groth16.Prove
+    Harvest.Actions
     Harvest.Types
     Harvest.Transaction
     Harvest.Script
@@ -64,6 +65,7 @@ test-suite unit-tests
     SignedDataLayoutSpec
     Ed25519Spec
     DevnetSpendSpec
+    HarvestFlow
     SpendHarness
     SpendHarnessSpec
     DevnetEnv
