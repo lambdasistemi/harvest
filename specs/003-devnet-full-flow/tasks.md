@@ -42,7 +42,7 @@ written. Finishing this phase leaves the tree compiling, no test logic yet.
 ### On-chain types and coalition validator
 
 - [ ] T005 Define `CoalitionDatum { issuer_pk, shop_pks, reificator_pks }` and the three `GovernanceRedeemer` constructors (`AddShop` / `AddReificator` / `RevokeReificator`) in `onchain/lib/harvest/coalition_types.ak` per `contracts/coalition-metadata-datum.md` §Datum + §Governance redeemer
-- [ ] T006 Implement the `coalition_metadata` spend validator in `onchain/validators/coalition_metadata.ak` per `contracts/coalition-metadata-datum.md` §Validator checks (one input/output at this address, issuer signature verification, sorted+unique list invariants, immutable `issuer_pk`)
+- [ ] T006 Implement the `coalition_metadata` spend validator in `onchain/validators/coalition_metadata.ak` per **all six checks** in `contracts/coalition-metadata-datum.md` §Validator checks. The contract is authoritative; do not re-enumerate here. Every check in that section must compile into the validator
 - [ ] T007 Extend `onchain/lib/voucher/types.ak` `VoucherDatum` to `{ user_id, commit_spent, shop_pk, reificator_pk }` per `contracts/voucher-datum.md` §Datum — keep the #15 shape wire-compatible by defining the new constructor at `Constr 0` with the extra fields appended (validator reads positionally)
 
 ### Off-chain state mirror and harness skeleton
@@ -84,8 +84,9 @@ resulting on-chain state matches `data-model.md` §Invariants #1–#3.
 
 ### Implementation for User Story 1
 
-- [ ] T021 [US1] Extend `voucher_spend` validator in `onchain/validators/voucher_spend.ak` to enforce the three additional checks in `contracts/voucher-datum.md` §Validator checks — settlement: coalition ref input present, `shop_pk ∈ shop_pks`, reificator signatory is in `reificator_pks` and matches `datum.reificator_pk`. Backwards-compat: keep the #15 no-coalition-ref path behind a separate validator entry point (per quickstart.md §Run the single-spend baseline from #15)
-- [ ] T022 [US1] Extend `Harvest.Transaction.spendVoucher` in `offchain/src/Harvest/Transaction.hs` to plumb the coalition `TxIn` as a reference input and to include the reificator key in `extra_signatories`. Keep the old single-arg signature as a helper that calls the new one with `Nothing`
+- [ ] T021 [US1] Extend `voucher_spend` validator in `onchain/validators/voucher_spend.ak` to enforce **all four** settlement checks in `contracts/voucher-datum.md` §Validator checks — settlement. The contract is authoritative; do not re-enumerate here. **No backwards-compat**: the validator requires the coalition ref input unconditionally — there is no "legacy no-ref" branch. T021b (below) migrates the #15 suite onto the new shape in the same commit sequence so `DevnetSpendSpec` stays green at every commit
+- [ ] T021b [US1] Migrate `offchain/test/DevnetSpendSpec.hs` (the merged #15 suite) to bootstrap a single-member coalition (one shop, one reificator) and thread the coalition ref input through every settlement it builds. The #15 invariants are unchanged; only the tx shape is. This task lands in the same commit as T021 so `just ci` stays green bisect-wise. Remove `quickstart.md` §Run the single-spend baseline from #15 once this lands (the paragraph is obsolete after the migration)
+- [ ] T022 [US1] Extend `Harvest.Transaction.spendVoucher` in `offchain/src/Harvest/Transaction.hs` to take the coalition `TxIn` as a required argument (reference input) and to include the reificator key in `extra_signatories`. No overload for the old signature — all callers pass the coalition ref after T021b
 - [ ] T023 [US1] Apply the updated `voucher_spend` blueprint and refresh `offchain/test/fixtures/applied-voucher-spend.hex`
 
 **Checkpoint**: Story 1 runs end-to-end green. Commit + push. This is the MVP.

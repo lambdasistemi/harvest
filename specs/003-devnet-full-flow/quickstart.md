@@ -39,20 +39,16 @@ smoke test.
 
 ## Run the single-spend baseline from #15
 
-Unchanged:
-
 ```bash
 cabal test harvest-test-suite --test-options="--match DevnetSpendSpec"
 ```
 
-This does **not** depend on any of the #9 additions; the #15 suite
-stays green regardless of the coalition-metadata changes because
-the #15 fixtures are run through a pre-existing voucher validator
-mode that does not require the coalition ref input. (Implementation
-note: the two modes are distinguished by whether the tx carries a
-coalition reference input; the validator accepts the #15 "no
-coalition ref" path for backwards compatibility until #9's
-on-chain changes are applied universally in a follow-up cleanup.)
+The #15 suite was migrated onto the #9 on-chain shape as part of
+T021b: every `DevnetSpendSpec` scenario now bootstraps a single-member
+coalition (one shop, one reificator) and threads the coalition
+reference input through its settlement tx. The #15 assertions are
+unchanged; only the tx shape is. There is **one** `voucher_spend`
+validator with **one** code path — no "legacy no-ref" branch.
 
 ## Regenerate fixtures (after circuit or signer change)
 

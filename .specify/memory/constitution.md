@@ -140,9 +140,9 @@ The shop refills the reificator's UTXO. The reificator spends from it for transa
 
 Fee deduction from loyalty points (converting points to ADA on-chain) is a future optimization, not a day-one requirement.
 
-### IX. On-Chain State: Three Tries
+### IX. On-Chain State: Three Tries (production) / Set-Valued UTxOs (prototype)
 
-A single UTXO holds the current root hash of three Merkle Patricia Tries:
+**Production form.** A single UTXO holds the current root hash of three Merkle Patricia Tries:
 
 | Trie | Structure | Purpose |
 |------|-----------|---------|
@@ -151,6 +151,15 @@ A single UTXO holds the current root hash of three Merkle Patricia Tries:
 | **Pending trie** | reificator_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
 
 The full trie data lives off-chain, published by the coalition. Untrusted data providers serve Merkle proofs verified against the on-chain root. The on-chain validator checks the Merkle proof in each transaction's redeemer and outputs a new root UTXO with the updated hash.
+
+**Prototype form (issue #9).** The prototype models the same semantics over explicit sets, without MPF/MPFS:
+
+| Artefact | Structure | Replaces |
+|----------|-----------|----------|
+| **Coalition-metadata UTxO** (reference input) | `CoalitionDatum { issuer_pk, shop_pks : Set pk, reificator_pks : Set pk }` | Reificator trie + coalition registry |
+| **Per-customer script UTxO** (one per customer) | `VoucherDatum { user_id, commit_spent, shop_pk, reificator_pk }` | Spend trie (one entry per UTxO) + Pending trie (present = committed, absent = redeemed/reverted) |
+
+Every security invariant of §V–§VII holds over the prototype form at N ∈ {1, 2, 3} with the same check structure (enforced in-validator rather than as a Merkle proof). The prototype form is wire-incompatible with the production form; migration from one to the other is tracked as a refinement obligation under issues #5 (MPF on-chain) and #8 (MPFS mediation). The prototype is correct and complete at small N; it is **not** operationally usable at scale — that is by design (Principle X).
 
 Every spend involves two on-chain transactions:
 
@@ -189,4 +198,4 @@ All dependencies, builds, and CI are Nix-managed. The flake produces all derivat
 
 This constitution supersedes all other practices. Privacy guarantees (Principle IV) and proof soundness (Principle V) cannot be weakened. The coalition model (Principle I) is the project's reason for existence.
 
-**Version**: 4.0.0 | **Ratified**: 2026-04-16
+**Version**: 4.1.0 | **Ratified**: 2026-04-16 | **Last Amended**: 2026-04-20 (Principle IX prototype carve-out)

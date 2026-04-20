@@ -67,36 +67,40 @@ subsequent story adds one kind of capability on top of a known-good
 baseline rather than validating the baseline itself.
 
 **Independent Test**: Running only this story against a freshly-spun
-devnet must produce: (a) a coalition root UTxO with an empty spend
-trie, (b) one shop registration observable in the registry trie, (c)
-two accepted settlement transactions in sequence, (d) a spend-trie
-state where the customer has a single entry with a counter equal to
-the sum of the two settlements' `d` values.
+devnet must produce: (a) a coalition-metadata UTxO with an empty
+registry datum (no shops, no reificators), (b) one shop and one
+reificator observable in the coalition-metadata datum after onboarding,
+(c) two accepted settlement transactions in sequence, (d) exactly one
+per-customer voucher UTxO whose `commit_spent` equals the Poseidon
+commitment declared in the second settlement's public inputs.
 
 **Acceptance Scenarios**:
 
 1. **Given** a fresh devnet and a funded genesis address, **When** the
    coalition-creation transaction is submitted, **Then** the node
-   accepts it and a root UTxO with empty (or canonically-initial)
-   registry and spend tries is observable at the coalition address.
+   accepts it and a coalition-metadata UTxO with an empty-registry
+   datum (no shops, no reificators) is observable at the coalition
+   address.
 
 2. **Given** a deployed coalition, **When** a shop-onboarding
    transaction registers `shop_pk` and `reificator_pk`, **Then** the
-   node accepts it and the registry trie reflects the new entries.
+   node accepts it and the coalition-metadata datum reflects the new
+   entries.
 
 3. **Given** a deployed coalition with one registered shop and a
    customer who already holds a signed cap certificate from the
    issuer, **When** the reificator submits the first settlement
-   transaction (ZK proof over non-membership, customer Ed25519
-   signature over `signed_data`, bound to a live TxOutRef), **Then**
-   the validator accepts the transaction and the spend trie contains a
-   single entry for this customer.
+   transaction (ZK proof, customer Ed25519 signature over
+   `signed_data`, bound to a live TxOutRef), **Then** the validator
+   accepts the transaction and a fresh per-customer voucher UTxO
+   exists for this customer.
 
 4. **Given** the state after scenario 3, **When** the reificator
    submits a second settlement from the same customer at the same
-   acceptor, **Then** the validator accepts the transaction (membership
-   branch) and the customer's spend-trie counter increases by the new
-   settlement's `d`.
+   acceptor, **Then** the validator accepts the transaction (updating
+   the existing per-customer UTxO in place) and the new UTxO's
+   `commit_spent` matches the Poseidon commitment declared in the
+   settlement's public inputs.
 
 ---
 
@@ -153,18 +157,19 @@ without it, but it must be covered to give confidence that the
 shop retains control of the entries it authorised. Depends on
 Story 1 (needs a spend-trie entry to revert).
 
-**Independent Test**: Starting from a spend trie with at least one
-pending entry, running only this story must produce a revert
-transaction that the validator accepts, and the resulting spend trie
-must reflect the rollback.
+**Independent Test**: Starting from at least one per-customer voucher
+UTxO, running only this story must produce a revert transaction that
+the validator accepts, and the resulting voucher UTxO must reflect the
+rollback (or be removed entirely).
 
 **Acceptance Scenarios**:
 
-1. **Given** a spend-trie entry created by Story 1, **When** a revert
-   transaction signed by the shop master key is submitted for that
-   entry, **Then** the validator accepts it and the trie's counter for
-   that customer is decremented (or the entry is removed if the
-   counter reaches zero).
+1. **Given** a per-customer voucher UTxO created by Story 1, **When** a
+   revert transaction signed by the shop master key is submitted for
+   that entry, **Then** the validator accepts it and the voucher UTxO's
+   `commit_spent` is rolled back to the shop-supplied prior value (or
+   the UTxO is consumed without a replacement, if the reverted
+   settlement was the customer's only one).
 
 ---
 
@@ -175,22 +180,24 @@ revocation, any settlement transaction submitted under that
 reificator's credentials is rejected by the validator.
 
 **Why this priority**: Revocation is the negative control for
-reificator trust. It proves that registry-trie membership is load-
-bearing rather than informational. Depends on Story 1 for a baseline
-"settlement is accepted when the reificator is registered" assertion.
+reificator trust. It proves that coalition-metadata membership is
+load-bearing rather than informational. Depends on Story 1 for a
+baseline "settlement is accepted when the reificator is registered"
+assertion.
 
 **Independent Test**: Starting from a registered reificator that can
 produce accepted settlements, running only this story must produce:
-(a) a registry-removal transaction accepted by the validator, (b) a
+(a) a reificator-removal transaction accepted by the validator, (b) a
 subsequent settlement attempt under the revoked reificator rejected by
 the validator with any rejection constructor.
 
 **Acceptance Scenarios**:
 
-1. **Given** a reificator currently registered in the registry trie,
-   **When** the coalition submits a registry-removal transaction for
-   that reificator, **Then** the validator accepts it and the registry
-   trie no longer contains the reificator's entry.
+1. **Given** a reificator currently registered in the coalition-
+   metadata datum, **When** the coalition submits a reificator-removal
+   transaction for that reificator, **Then** the validator accepts it
+   and the coalition-metadata datum no longer contains the
+   reificator's public key.
 
 2. **Given** the state after revocation, **When** a settlement is
    submitted whose redeemer references the revoked reificator, **Then**
