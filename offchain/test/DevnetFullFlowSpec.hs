@@ -45,7 +45,12 @@ import Data.Char (isHexDigit)
 import DevnetEnv (DevnetEnv (..), withEnv)
 import qualified Harvest.Script as Script
 import Harvest.Types (CoalitionDatum (..))
-import HarvestFlow (HarvestFlow (..), bootstrapCoalition)
+import HarvestFlow (
+    GovOp (..),
+    HarvestFlow (..),
+    bootstrapCoalition,
+    submitGovernance,
+ )
 import Lens.Micro ((^.))
 import PlutusTx.IsData.Class (fromData)
 import Test.Hspec (
@@ -74,7 +79,7 @@ loadCoalitionAddr = do
 
 spec :: Spec
 spec = describe "Devnet full protocol flow (US1 — #9)" $ do
-    (_coalitionBytes, coalitionAddr) <- runIO loadCoalitionAddr
+    (coalitionBytes, coalitionAddr) <- runIO loadCoalitionAddr
 
     around withEnv $ do
         it "devnet comes up with a funded genesis address" $ \env ->
@@ -109,6 +114,66 @@ spec = describe "Devnet full protocol flow (US1 — #9)" $ do
                         Just cd -> do
                             cdShopPks cd `shouldBe` []
                             cdReificatorPks cd `shouldBe` []
+                            cdIssuerPk cd `shouldBe` expectedIssuer
+                        Nothing ->
+                            error
+                                "coalition output datum did not parse as CoalitionDatum"
+                _ ->
+                    error "coalition output has no inline datum"
+
+        -- == Shop + reificator onboarding (T017, Story 1 step 2) ==
+        --
+        -- After bootstrap the coalition registry is empty.  The issuer
+        -- runs two governance txs back-to-back: 'AddShop' for the
+        -- shop's public key, then 'AddReificator' for the reificator's
+        -- public key.  Each tx consumes the current coalition UTxO,
+        -- carries an issuer Ed25519 signature over @serialise(own_ref)
+        -- || op_tag || target_pk@, and re-pays the coalition address
+        -- with the extended datum.  The reificator funds fees and
+        -- collateral from its bootstrap-seeded UTxOs.
+        --
+        -- What this test proves when it passes:
+        --   * 'submitGovernance' constructs signed redeemers the
+        --     on-chain validator accepts for both 'AddShop' and
+        --     'AddReificator'.
+        --   * The rotated coalition UTxO carries the transitioned
+        --     datum: exactly one shop pk, exactly one reificator pk,
+        --     and the original issuer pk preserved.
+        --   * 'HarvestFlow' correctly forwards to the rotated UTxO
+        --     (invariant #1 of @data-model.md@ — only the registry
+        --     lists change; everything else is stable).
+        it "shop + reificator onboard extends the coalition datum" $ \env -> do
+            flow0 <- bootstrapCoalition env coalitionAddr
+            let expectedIssuer =
+                    rawSerialiseVerKeyDSIGN
+                        (deriveVerKeyDSIGN (deIssuerKey env))
+                shopPk =
+                    rawSerialiseVerKeyDSIGN
+                        (deriveVerKeyDSIGN (deShopKey env))
+                reificatorPk =
+                    rawSerialiseVerKeyDSIGN
+                        (deriveVerKeyDSIGN (deReificatorKey env))
+            flow1 <-
+                submitGovernance
+                    env
+                    coalitionBytes
+                    coalitionAddr
+                    flow0
+                    (GovAddShop shopPk)
+            flow2 <-
+                submitGovernance
+                    env
+                    coalitionBytes
+                    coalitionAddr
+                    flow1
+                    (GovAddReificator reificatorPk)
+            let coalDatumLedger = hfCoalitionOut flow2 ^. datumTxOutL
+            case coalDatumLedger of
+                Datum bd ->
+                    case fromData (getPlutusData (binaryDataToData bd)) of
+                        Just cd -> do
+                            cdShopPks cd `shouldBe` [shopPk]
+                            cdReificatorPks cd `shouldBe` [reificatorPk]
                             cdIssuerPk cd `shouldBe` expectedIssuer
                         Nothing ->
                             error
