@@ -221,12 +221,19 @@ Owns the live UTxO references that tests thread through scenarios:
 
 ```haskell
 data HarvestFlow = HarvestFlow
-    { hfCoalitionIn     :: TxIn
-    , hfCoalitionOut    :: TxOut ConwayEra
-    , hfReificatorFeeIn :: TxIn
-    , hfVoucherEntries  :: Map UserId (TxIn, TxOut ConwayEra)
+    { hfCoalitionIn             :: TxIn
+    , hfCoalitionOut            :: TxOut ConwayEra
+    , hfReificatorFeeIn         :: TxIn
+    , hfReificatorFeeOut        :: TxOut ConwayEra
+    , hfReificatorCollateralIn  :: TxIn
+    , hfReificatorCollateralOut :: TxOut ConwayEra
+    , hfVoucherEntries          :: Map UserId (TxIn, TxOut ConwayEra)
     }
 ```
+
+The fee UTxO funds regular inputs; the collateral UTxO is held
+separate because a Cardano tx can use a given UTxO as EITHER a
+regular input OR collateral, never both.
 
 `HarvestFlow` is produced by `bootstrapCoalition` at the start of
 each spec file and updated after each submitted tx so downstream
