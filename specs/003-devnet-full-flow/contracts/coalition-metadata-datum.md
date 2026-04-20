@@ -39,23 +39,27 @@ Submitted against the coalition-metadata validator:
 ```text
 Constr 0    -- AddShop
   [ Bytes   -- target shop_pk (32)
-  , Bytes   -- issuer_sig (64) over (txid || 0x00 || target_pk)
+  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x00 || target_pk)
   ]
 
 Constr 1    -- AddReificator
   [ Bytes   -- target reificator_pk (32)
-  , Bytes   -- issuer_sig (64) over (txid || 0x01 || target_pk)
+  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x01 || target_pk)
   ]
 
 Constr 2    -- RevokeReificator
   [ Bytes   -- target reificator_pk (32)
-  , Bytes   -- issuer_sig (64) over (txid || 0x02 || target_pk)
+  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x02 || target_pk)
   ]
 ```
 
-`txid` is the 32-byte hash of the consuming transaction body (as
-`ScriptContext` exposes it, which the validator computes via the
-Plutus V3 builtins).
+`own_ref` is the `OutputReference` of the coalition UTxO being
+consumed, serialised via the Plutus V3 `serialise_data` builtin.
+Signing over `own_ref` (known at tx-build time) rather than `txid`
+avoids a circular dependency: `txid` depends on `script_data_hash`,
+which hashes the redeemers — so a signature placed in the redeemer
+cannot cover `txid`. `own_ref` is unique per UTxO and gives replay
+protection for free.
 
 ## Validator checks
 
@@ -63,8 +67,9 @@ Plutus V3 builtins).
 2. Exactly one output is at this script's address.
 3. The output carries an inline datum with the updated list (sorted,
    unique, `issuer_pk` preserved).
-4. `VerifyEd25519Signature(issuer_pk, txid || op_tag || target_pk,
-   issuer_sig)` returns `True`.
+4. `VerifyEd25519Signature(issuer_pk, serialise(own_ref) || op_tag ||
+   target_pk, issuer_sig)` returns `True`, where `own_ref` is the
+   `OutputReference` of the coalition input being spent.
 5. For `AddShop` / `AddReificator`: the target is not already in the
    list.
 6. For `RevokeReificator`: the target is in the list. (Revocation of

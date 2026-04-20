@@ -1,3 +1,4 @@
+use aiken/builtin
 use aiken/crypto
 use aiken/primitive/bytearray
 use cardano/address.{Address}
@@ -86,9 +87,18 @@ validator coalition_metadata {
     // preserved by all three branches above.
     expect output_datum == expected_datum
 
-    // (4) Ed25519 signature by issuer_pk over txid || op_tag || target_pk.
+    // (4) Ed25519 signature by issuer_pk over
+    //     serialise(own_ref) || op_tag || target_pk.
+    //
+    // Signing over the consumed UTxO's OutputReference rather than
+    // `self.id` dodges the circular dependency of txid signing: the
+    // redeemer hashes into `script_data_hash`, which hashes into
+    // `tx.id`, so a signature over `tx.id` can never be computed by
+    // the submitter. `own_ref` is unique per UTxO and is known at
+    // tx-build time, giving replay protection for free.
+    let own_ref_bytes = builtin.serialise_data(own_ref)
     let message =
-      self.id
+      own_ref_bytes
         |> bytearray.concat(op_tag)
         |> bytearray.concat(target_pk)
     crypto.verify_ed25519_signature(
