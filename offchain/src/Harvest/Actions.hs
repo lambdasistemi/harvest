@@ -28,11 +28,19 @@ module Harvest.Actions (
     -- * Result
     Reject (..),
     Step,
+
+    -- * Coalition governance transitions
+    bootstrap,
+    addShop,
+    addReificator,
+    revokeReificator,
 ) where
 
+import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
+import qualified Data.Set as Set
 
 -- | Opaque Ed25519 public key.
 newtype PubKey = PubKey {unPubKey :: ByteString}
@@ -94,3 +102,64 @@ data Reject
 
 -- | Transition result: either a rejection or a new state.
 type Step = Either Reject HarvestState
+
+-- * Signature-validity stub
+--
+-- The pure twin has no crypto; the on-chain validator is the real
+-- gatekeeper. For signature-parity parity only (research D9) the
+-- Haskell side treats a 'Sig' as valid iff its underlying
+-- 'ByteString' is non-empty. Tests drive rejection paths by passing
+-- @Sig mempty@.
+sigValid :: Sig -> Bool
+sigValid (Sig bs) = not (BS.null bs)
+
+{- | Build an empty 'HarvestState' with the given issuer key.
+
+Mirrors @Transitions.applyCreateCoalition@ on the Lean side. Always
+succeeds — on-chain this is the coalition-create transaction and has
+no policy gate beyond the signer paying its own fee.
+-}
+bootstrap :: PubKey -> HarvestState
+bootstrap issuer =
+    HarvestState
+        { hsShops = Set.empty
+        , hsReificators = Set.empty
+        , hsIssuer = issuer
+        , hsEntries = mempty
+        }
+
+{- | Governance: add a shop to the coalition.
+
+Rejects with 'IssuerSigInvalid' if the issuer signature is invalid,
+or 'ShopAlreadyRegistered' if the shop is already in the registry.
+Otherwise inserts @shop@ into 'hsShops'.
+-}
+addShop :: PubKey -> Sig -> HarvestState -> Step
+addShop shop sig st
+    | not (sigValid sig) = Left IssuerSigInvalid
+    | shop `Set.member` hsShops st = Left ShopAlreadyRegistered
+    | otherwise = Right st {hsShops = Set.insert shop (hsShops st)}
+
+{- | Governance: add a reificator to the coalition.
+
+Dual of 'addShop' against 'hsReificators'.
+-}
+addReificator :: PubKey -> Sig -> HarvestState -> Step
+addReificator reif sig st
+    | not (sigValid sig) = Left IssuerSigInvalid
+    | reif `Set.member` hsReificators st = Left ReificatorAlreadyRegistered
+    | otherwise =
+        Right st {hsReificators = Set.insert reif (hsReificators st)}
+
+{- | Governance: remove a reificator from the coalition.
+
+Rejects with 'IssuerSigInvalid' on a bad signature, or
+'ReificatorNotRegistered' if the key isn't currently registered.
+Otherwise deletes @reif@ from 'hsReificators'.
+-}
+revokeReificator :: PubKey -> Sig -> HarvestState -> Step
+revokeReificator reif sig st
+    | not (sigValid sig) = Left IssuerSigInvalid
+    | reif `Set.notMember` hsReificators st = Left ReificatorNotRegistered
+    | otherwise =
+        Right st {hsReificators = Set.delete reif (hsReificators st)}
