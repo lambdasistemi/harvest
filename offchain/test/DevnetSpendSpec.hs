@@ -58,17 +58,34 @@ enforces.
 -}
 module DevnetSpendSpec (spec) where
 
+import Cardano.Crypto.DSIGN (
+    deriveVerKeyDSIGN,
+    rawSerialiseVerKeyDSIGN,
+ )
+import Cardano.Ledger.Address (Addr)
 import Cardano.Ledger.Api.Scripts.Data (Datum (NoDatum))
 import Cardano.Ledger.Api.Tx.Out (addrTxOutL, coinTxOutL, datumTxOutL)
+import Cardano.Ledger.BaseTypes (Network (..))
 import Cardano.Node.Client.Submitter (SubmitResult (..))
 import Data.Bits (xor)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as Base16
+import qualified Data.ByteString.Char8 as BS8
+import qualified Data.ByteString.Short as SBS
+import Data.Char (isHexDigit)
 import Data.Word (Word8)
 import DevnetEnv (DevnetEnv (..), withEnv)
-import Fixtures (SpendBundle (..), loadBundle)
+import Fixtures (SpendBundle (..), fixturesDir, loadBundle)
+import qualified Harvest.Script as Script
+import HarvestFlow (
+    GovOp (..),
+    HarvestFlow (..),
+    bootstrapCoalition,
+    submitGovernance,
+ )
 import Lens.Micro ((^.))
 import SignedDataLayout (offsetAcceptorAy)
-import SpendScenario (Mutations (..), identityMutations, submitSpend)
+import SpendScenario (CoalitionEnv (..), Mutations (..), identityMutations, submitSpend)
 import SpendSetup (DeployedSpend (..), deploySpendState)
 import Test.Hspec (
     Spec,
@@ -82,9 +99,56 @@ import Test.Hspec (
     shouldSatisfy,
  )
 
+{- | Load coalition-metadata script and derive testnet address.
+-}
+loadCoalitionAddr :: IO (SBS.ShortByteString, Addr)
+loadCoalitionAddr = do
+    raw <- BS.readFile (fixturesDir <> "/applied-coalition-metadata.hex")
+    let sbs = decodeHex raw
+    pure (sbs, Script.coalitionAddr Testnet sbs)
+  where
+    decodeHex bs = case Base16.decode (BS8.filter isHexDigit bs) of
+        Right decoded -> SBS.toShort decoded
+        Left e -> error ("applied-coalition-metadata.hex: " <> e)
+
+{- | Bootstrap a single-member coalition (one shop, one reificator)
+and return a 'CoalitionEnv' the spend scenarios can use as a
+reference input.
+-}
+setupCoalition :: DevnetEnv -> SBS.ShortByteString -> Addr -> IO CoalitionEnv
+setupCoalition env coalitionBytes coalitionAddr = do
+    let shopPk =
+            rawSerialiseVerKeyDSIGN
+                (deriveVerKeyDSIGN (deShopKey env))
+        reificatorPk =
+            rawSerialiseVerKeyDSIGN
+                (deriveVerKeyDSIGN (deReificatorKey env))
+    flow0 <- bootstrapCoalition env coalitionAddr
+    flow1 <-
+        submitGovernance
+            env
+            coalitionBytes
+            coalitionAddr
+            flow0
+            (GovAddShop shopPk)
+    flow2 <-
+        submitGovernance
+            env
+            coalitionBytes
+            coalitionAddr
+            flow1
+            (GovAddReificator reificatorPk)
+    pure
+        CoalitionEnv
+            { ceCoalitionTxIn = hfCoalitionIn flow2
+            , ceCoalitionTxOut = hfCoalitionOut flow2
+            , ceReificatorKey = deReificatorKey env
+            }
+
 spec :: Spec
 spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
     bundle <- runIO loadBundle
+    (coalitionBytes, coalitionAddr) <- runIO loadCoalitionAddr
 
     -- The bundle-load step is a hard runtime check: if the fixture
     -- tree is missing or malformed, every scenario below is moot.
@@ -156,8 +220,9 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- ledger may reword it across versions, only the constructor
         -- matters.
         it "a customer spends at an acceptor — validator accepts" $ \env -> do
+            coalEnv <- setupCoalition env coalitionBytes coalitionAddr
             deployed <- deploySpendState env bundle
-            result <- submitSpend env bundle deployed identityMutations
+            result <- submitSpend env bundle deployed coalEnv identityMutations
             case result of
                 Submitted _txId -> pure ()
                 Rejected reason ->
@@ -173,12 +238,13 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- rejects because the signature no longer covers the byte that
         -- was flipped.
         it "defends against signed_data byte tampering" $ \env -> do
+            coalEnv <- setupCoalition env coalitionBytes coalitionAddr
             deployed <- deploySpendState env bundle
             let muts =
                     identityMutations
                         { mSignedData = flipByteAt offsetAcceptorAy
                         }
-            result <- submitSpend env bundle deployed muts
+            result <- submitSpend env bundle deployed coalEnv muts
             result `shouldSatisfy` isRejected
 
         -- == d cross-check (T031, FR-002.2) ==
@@ -191,12 +257,13 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- fails. Without this check, the reificator could inflate the
         -- redeemed amount past what the ZK proof actually authorised.
         it "defends against redeemer.d mismatch with signed_data.d" $ \env -> do
+            coalEnv <- setupCoalition env coalitionBytes coalitionAddr
             deployed <- deploySpendState env bundle
             let muts =
                     identityMutations
                         { mBundle = \b -> b{sbD = sbD b + 1}
                         }
-            result <- submitSpend env bundle deployed muts
+            result <- submitSpend env bundle deployed coalEnv muts
             result `shouldSatisfy` isRejected
 
         -- == pk_c split mismatch (T032, FR-002.3) ==
@@ -209,13 +276,14 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- [16..32] must equal pk_c_lo) fails. This keeps proofs and
         -- signatures from being mixed and matched across customers.
         it "defends against customer-key substitution" $ \env -> do
+            coalEnv <- setupCoalition env coalitionBytes coalitionAddr
             deployed <- deploySpendState env bundle
             let muts =
                     identityMutations
                         { mBundle = \b ->
                             b{sbCustomerPubkey = flipByteAt 0 (sbCustomerPubkey b)}
                         }
-            result <- submitSpend env bundle deployed muts
+            result <- submitSpend env bundle deployed coalEnv muts
             result `shouldSatisfy` isRejected
 
         -- == TxOutRef absent (T033, FR-002.4) ==
@@ -228,12 +296,13 @@ spec = describe "Devnet spend end-to-end (FR-001, FR-002)" $ do
         -- 'signed_data.txOutRef ∈ tx.inputs' check then fails, preventing
         -- replay of a valid bundle into an unrelated tx.
         it "defends against TxOutRef replay" $ \env -> do
+            coalEnv <- setupCoalition env coalitionBytes coalitionAddr
             deployed <- deploySpendState env bundle
             let muts =
                     identityMutations
                         { mLiveTxid = const (BS.replicate 32 0xAA)
                         }
-            result <- submitSpend env bundle deployed muts
+            result <- submitSpend env bundle deployed coalEnv muts
             result `shouldSatisfy` isRejected
 
 {- | Flip a single byte of a 'BS.ByteString' at the given offset. Used

@@ -6,6 +6,7 @@ module Harvest.Transaction (
 import Cardano.Ledger.Address (Addr)
 import Cardano.Ledger.Conway (ConwayEra)
 import Cardano.Ledger.Conway.Scripts (AlonzoScript)
+import Cardano.Ledger.Keys (KeyHash, KeyRole (Guard))
 import Cardano.Ledger.Mary.Value (MaryValue)
 import Cardano.Ledger.TxIn (TxIn)
 import Cardano.Node.Client.TxBuild (
@@ -13,6 +14,8 @@ import Cardano.Node.Client.TxBuild (
     attachScript,
     collateral,
     payTo',
+    reference,
+    requireSignature,
     spendScript,
  )
 import Data.ByteString (ByteString)
@@ -43,6 +46,10 @@ spendVoucher ::
     TxIn ->
     -- | Supermarket's collateral UTXO
     TxIn ->
+    -- | Coalition-metadata UTxO (reference input)
+    TxIn ->
+    -- | Reificator key hash (for requireSignature)
+    KeyHash Guard ->
     -- | The voucher_spend validator script
     AlonzoScript ConwayEra ->
     -- | Script address (where the output goes back)
@@ -71,11 +78,17 @@ spendVoucher ::
     ByteString ->
     -- | The ZK proof
     Groth16Proof ->
+    -- | shop_pk (32-byte Ed25519 pk, frozen in datum)
+    ByteString ->
+    -- | reificator_pk (32-byte Ed25519 pk, frozen in datum)
+    ByteString ->
     -- | (input index, output index)
     TxBuild q e (Word32, Word32)
 spendVoucher
     userUtxo
     collateralUtxo
+    coalitionRefUtxo
+    reificatorKeyHash
     script
     scriptAddr
     lockedValue
@@ -89,11 +102,17 @@ spendVoucher
     customerPubkey
     customerSignature
     signedData
-    proof = do
+    proof
+    shopPk
+    reificatorPk = do
         -- Attach the validator script
         attachScript script
         -- Add collateral
         collateral collateralUtxo
+        -- Coalition-metadata reference input
+        reference coalitionRefUtxo
+        -- Reificator must sign
+        requireSignature reificatorKeyHash
         -- Spend the user's UTXO with the redeemer
         spendIdx <-
             spendScript
@@ -118,7 +137,7 @@ spendVoucher
                 VoucherDatum
                     { vdUserId = userId
                     , vdCommitSpent = commitNew
-                    , vdShopPk = mempty
-                    , vdReificatorPk = mempty
+                    , vdShopPk = shopPk
+                    , vdReificatorPk = reificatorPk
                     }
         pure (spendIdx, outIdx)

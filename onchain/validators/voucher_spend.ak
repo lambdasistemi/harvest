@@ -1,8 +1,9 @@
 use aiken/crypto
 use aiken/primitive/bytearray
-use cardano/address.{Address}
+use cardano/address.{Address, Script}
 use cardano/script_context.{ScriptContext}
 use cardano/transaction.{InlineDatum, Input, Output, OutputReference, Transaction}
+use harvest/coalition_types.{CoalitionDatum}
 use voucher/groth16
 use voucher/types.{SpendRedeemer, VerificationKey, VoucherDatum}
 
@@ -20,7 +21,7 @@ use voucher/types.{SpendRedeemer, VerificationKey, VoucherDatum}
 ///      a specific Cardano tx — specifically one consumed TxOutRef — and
 ///      to `acceptor_pk` and `d`. This prevents proof replay across txs
 ///      and substitution of acceptor, d, or customer key.
-validator voucher_spend(vk: VerificationKey) {
+validator voucher_spend(vk: VerificationKey, coalition_hash: ByteArray) {
   spend(
     datum: Option<VoucherDatum>,
     redeemer: SpendRedeemer,
@@ -82,8 +83,33 @@ validator voucher_spend(vk: VerificationKey) {
 
     let proof_valid = groth16.verify(vk, redeemer.proof, public_inputs)
 
+    // --- Settlement checks (coalition membership + signatory) ---
+
+    // (1) Exactly one reference input at the coalition-metadata address
+    //     with a parseable CoalitionDatum.
+    expect Some(coalition) =
+      find_coalition_ref(self.reference_inputs, coalition_hash)
+
+    // (2) datum.shop_pk ∈ coalition.shop_pks
+    expect list_contains(coalition.shop_pks, voucher.shop_pk)
+
+    // (3) datum.reificator_pk ∈ coalition.reificator_pks AND
+    //     blake2b_224(datum.reificator_pk) ∈ tx.extra_signatories
+    expect list_contains(coalition.reificator_pks, voucher.reificator_pk)
+    let reificator_hash = crypto.blake2b_224(voucher.reificator_pk)
+    expect list_contains(self.extra_signatories, reificator_hash)
+
+    // (4) Output preserves user_id, shop_pk, reificator_pk; only
+    //     commit_spent rotates.
     let output_valid =
-      check_output(self, own_ref, voucher.user_id, redeemer.commit_spent_new)
+      check_output(
+        self,
+        own_ref,
+        voucher.user_id,
+        redeemer.commit_spent_new,
+        voucher.shop_pk,
+        voucher.reificator_pk,
+      )
 
     // We already `expect`-ed the signed_data binding checks above; keep a
     // reference to the unused parsed acceptor values so the compiler
@@ -119,6 +145,8 @@ fn check_output(
   own_ref: OutputReference,
   user_id: Int,
   new_commit: Int,
+  shop_pk: ByteArray,
+  reificator_pk: ByteArray,
 ) -> Bool {
   expect Some(own_input) =
     tx.inputs |> find_input(own_ref)
@@ -130,7 +158,7 @@ fn check_output(
 
   expect InlineDatum(raw_datum) = output.datum
   expect datum: VoucherDatum = raw_datum
-  datum.user_id == user_id && datum.commit_spent == new_commit
+  datum.user_id == user_id && datum.commit_spent == new_commit && datum.shop_pk == shop_pk && datum.reificator_pk == reificator_pk
 }
 
 fn find_input(
@@ -159,6 +187,46 @@ fn find_output_at(
         Some(output)
       } else {
         find_output_at(rest, addr)
+      }
+  }
+}
+
+/// Find the coalition-metadata reference input by script hash and parse
+/// its inline datum as a CoalitionDatum.
+fn find_coalition_ref(
+  ref_inputs: List<Input>,
+  script_hash: ByteArray,
+) -> Option<CoalitionDatum> {
+  when ref_inputs is {
+    [] -> None
+    [input, ..rest] ->
+      when input.output.address.payment_credential is {
+        Script(hash) ->
+          if hash == script_hash {
+            when input.output.datum is {
+              InlineDatum(raw) -> {
+                expect cd: CoalitionDatum = raw
+                Some(cd)
+              }
+              _ -> find_coalition_ref(rest, script_hash)
+            }
+          } else {
+            find_coalition_ref(rest, script_hash)
+          }
+        _ -> find_coalition_ref(rest, script_hash)
+      }
+  }
+}
+
+/// Check whether a bytearray is in a list.
+fn list_contains(xs: List<ByteArray>, x: ByteArray) -> Bool {
+  when xs is {
+    [] -> False
+    [head, ..tail] ->
+      if head == x {
+        True
+      } else {
+        list_contains(tail, x)
       }
   }
 }

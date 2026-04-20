@@ -26,7 +26,7 @@ import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 spec :: Spec
 spec = describe "E2E fixture validation" $ do
     it "loads and parses the applied PlutusV3 script" $ do
-        scriptHex <- BS.readFile (fixturesDir <> "/applied-script.hex")
+        scriptHex <- BS.readFile (fixturesDir <> "/applied-voucher-spend.hex")
         let Right scriptBytes = Base16.decode scriptHex
             script = loadScript (SBS.toShort scriptBytes)
             addr = scriptAddr Testnet script

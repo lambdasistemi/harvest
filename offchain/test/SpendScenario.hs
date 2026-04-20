@@ -37,18 +37,32 @@ documented attack vector. Four hooks are exposed:
 module SpendScenario (
     Mutations (..),
     identityMutations,
+    CoalitionEnv (..),
     submitSpend,
 ) where
 
 import Cardano.Crypto.Hash.Class (hashToBytes)
 import Cardano.Groth16.Types (CompressedProof (..))
+import Cardano.Ledger.Api.Tx.Out (TxOut)
 import Cardano.Ledger.BaseTypes (TxIx (..))
 import Cardano.Ledger.Coin (Coin (..))
+import Cardano.Ledger.Conway (ConwayEra)
 import Cardano.Ledger.Hashes (extractHash)
+import Cardano.Ledger.Keys (
+    KeyHash,
+    KeyRole (..),
+    VKey (..),
+    hashKey,
+ )
 import Cardano.Ledger.Mary.Value (MaryValue)
 import Cardano.Ledger.TxIn (TxId (..), TxIn (..))
 import Cardano.Ledger.Val (inject)
-import Cardano.Node.Client.E2E.Setup (addKeyWitness)
+import Cardano.Node.Client.E2E.Setup (
+    Ed25519DSIGN,
+    SignKeyDSIGN,
+    addKeyWitness,
+    deriveVerKeyDSIGN,
+ )
 import Cardano.Node.Client.Provider (Provider (..))
 import Cardano.Node.Client.Submitter (
     SubmitResult (..),
@@ -101,6 +115,15 @@ identityMutations =
         , mSignedData = id
         }
 
+{- | Coalition state needed by the spend scenario: the reference UTxO
+and the reificator's signing key (for 'requireSignature').
+-}
+data CoalitionEnv = CoalitionEnv
+    { ceCoalitionTxIn :: TxIn
+    , ceCoalitionTxOut :: TxOut ConwayEra
+    , ceReificatorKey :: SignKeyDSIGN Ed25519DSIGN
+    }
+
 -- | Empty 'ctx' query type: the spend prog uses no queries.
 data NoQ a
     deriving ()
@@ -110,9 +133,10 @@ submitSpend ::
     DevnetEnv ->
     SpendBundle ->
     DeployedSpend ->
+    CoalitionEnv ->
     Mutations ->
     IO SubmitResult
-submitSpend env bundle0 deployed muts = do
+submitSpend env bundle0 deployed coalEnv muts = do
     let bundle = mBundle muts bundle0
 
         script = Script.loadScript (decodeHex (sbAppliedScriptHex bundle0))
@@ -167,12 +191,18 @@ submitSpend env bundle0 deployed muts = do
         lockedValue :: MaryValue
         lockedValue = inject (dsScriptPay deployed)
 
+        reificatorKeyHash :: KeyHash Guard
+        reificatorKeyHash =
+            hashKey (VKey (deriveVerKeyDSIGN (ceReificatorKey coalEnv)))
+
         prog :: TxBuild NoQ () ()
         prog = do
             _ <-
                 spendVoucher
                     (dsScriptTxIn deployed)
                     (dsReificatorCollateralTxIn deployed)
+                    (ceCoalitionTxIn coalEnv)
+                    reificatorKeyHash
                     script
                     scriptAddress
                     lockedValue
@@ -187,6 +217,8 @@ submitSpend env bundle0 deployed muts = do
                     reSignature
                     reSignedData
                     proof
+                    (dsShopPk deployed)
+                    (dsReificatorPk deployed)
             pure ()
 
         interpret :: InterpretIO NoQ
@@ -205,6 +237,7 @@ submitSpend env bundle0 deployed muts = do
         inputUtxos =
             [ (dsScriptTxIn deployed, dsScriptTxOut deployed)
             , (dsReificatorFeeTxIn deployed, dsReificatorFeeTxOut deployed)
+            , (ceCoalitionTxIn coalEnv, ceCoalitionTxOut coalEnv)
             ]
 
     result <-

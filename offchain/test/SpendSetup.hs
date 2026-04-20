@@ -46,6 +46,9 @@ import Cardano.Ledger.Keys (
 import Cardano.Ledger.Mary.Value (MaryValue)
 import Cardano.Ledger.TxIn (TxIn)
 import Cardano.Ledger.Val (inject)
+import Cardano.Crypto.DSIGN (
+    rawSerialiseVerKeyDSIGN,
+ )
 import Cardano.Node.Client.E2E.Setup (
     Ed25519DSIGN,
     SignKeyDSIGN,
@@ -71,6 +74,7 @@ import Cardano.Node.Client.TxBuild (
     spend,
  )
 import Control.Concurrent (threadDelay)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Char8 as BS8
@@ -108,6 +112,10 @@ data DeployedSpend = DeployedSpend
     -- ^ Value the setup tx paid to the reificator's collateral UTxO.
     , dsScriptPay :: Coin
     -- ^ Value locked at the script address in the VoucherDatum UTxO.
+    , dsShopPk :: ByteString
+    -- ^ 32-byte Ed25519 shop public key frozen in the VoucherDatum.
+    , dsReificatorPk :: ByteString
+    -- ^ 32-byte Ed25519 reificator public key frozen in the VoucherDatum.
     }
 
 {- | Submit the setup tx and wait for the two outputs to appear.
@@ -135,12 +143,18 @@ deploySpendState env bundle = do
         userId = sbPublicInputs bundle !! 3
         commitOld = sbPublicInputs bundle !! 1
 
+        shopPk =
+            rawSerialiseVerKeyDSIGN
+                (deriveVerKeyDSIGN (deShopKey env))
+        reificatorPk =
+            rawSerialiseVerKeyDSIGN
+                (deriveVerKeyDSIGN (deReificatorKey env))
         voucherDatum =
             VoucherDatum
                 { vdUserId = userId
                 , vdCommitSpent = commitOld
-                , vdShopPk = mempty
-                , vdReificatorPk = mempty
+                , vdShopPk = shopPk
+                , vdReificatorPk = reificatorPk
                 }
 
         -- Two distinct reificator outputs because a Cardano tx can
@@ -222,6 +236,8 @@ deploySpendState env bundle = do
             , dsReificatorFeePay = reificatorFeePay
             , dsReificatorCollateralPay = reificatorCollateralPay
             , dsScriptPay = scriptPay
+            , dsShopPk = shopPk
+            , dsReificatorPk = reificatorPk
             }
   where
     pickOne :: String -> Coin -> [(TxIn, TxOut ConwayEra)] -> IO (TxIn, TxOut ConwayEra)
