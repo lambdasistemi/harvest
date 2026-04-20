@@ -118,5 +118,7 @@ spendVoucher
                 VoucherDatum
                     { vdUserId = userId
                     , vdCommitSpent = commitNew
+                    , vdShopPk = mempty
+                    , vdReificatorPk = mempty
                     }
         pure (spendIdx, outIdx)

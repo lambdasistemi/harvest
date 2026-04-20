@@ -139,6 +139,8 @@ deploySpendState env bundle = do
             VoucherDatum
                 { vdUserId = userId
                 , vdCommitSpent = commitOld
+                , vdShopPk = mempty
+                , vdReificatorPk = mempty
                 }
 
         -- Two distinct reificator outputs because a Cardano tx can

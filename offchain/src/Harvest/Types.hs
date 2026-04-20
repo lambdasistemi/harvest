@@ -1,28 +1,97 @@
--- | Voucher on-chain types with ToData instances matching the Aiken encoding.
+-- | Voucher on-chain types with ToData / FromData instances matching the Aiken encoding.
 module Harvest.Types (
     VoucherDatum (..),
     SpendRedeemer (..),
     Groth16Proof (..),
+    CoalitionDatum (..),
+    GovernanceRedeemer (..),
 ) where
 
 import Data.ByteString (ByteString)
 import qualified PlutusCore.Data as PLC
 import PlutusTx.Builtins.Internal (BuiltinData (..))
-import PlutusTx.IsData.Class (ToData (..))
+import PlutusTx.IsData.Class (FromData (..), ToData (..))
 
-{- | On-chain state per user.
+{- | On-chain state per (user, shop, reificator).
 
-Aiken: @Constr 0 [Int user_id, Int commit_spent]@
+Aiken: @Constr 0 [Int user_id, Int commit_spent, Bytes shop_pk, Bytes reificator_pk]@
 -}
 data VoucherDatum = VoucherDatum
     { vdUserId :: Integer
     , vdCommitSpent :: Integer
+    , vdShopPk :: ByteString
+    , vdReificatorPk :: ByteString
     }
 
 instance ToData VoucherDatum where
-    toBuiltinData (VoucherDatum uid cs) =
+    toBuiltinData (VoucherDatum uid cs shop reif) =
         BuiltinData $
-            PLC.Constr 0 [PLC.I uid, PLC.I cs]
+            PLC.Constr 0 [PLC.I uid, PLC.I cs, PLC.B shop, PLC.B reif]
+
+instance FromData VoucherDatum where
+    fromBuiltinData (BuiltinData d) = case d of
+        PLC.Constr 0 [PLC.I uid, PLC.I cs, PLC.B shop, PLC.B reif] ->
+            Just (VoucherDatum uid cs shop reif)
+        _ -> Nothing
+
+{- | Coalition-metadata registry datum.
+
+Aiken: @Constr 0 [List Bytes shop_pks, List Bytes reificator_pks, Bytes issuer_pk]@
+-}
+data CoalitionDatum = CoalitionDatum
+    { cdShopPks :: [ByteString]
+    , cdReificatorPks :: [ByteString]
+    , cdIssuerPk :: ByteString
+    }
+
+instance ToData CoalitionDatum where
+    toBuiltinData (CoalitionDatum shops reifs issuer) =
+        BuiltinData $
+            PLC.Constr
+                0
+                [ PLC.List (map PLC.B shops)
+                , PLC.List (map PLC.B reifs)
+                , PLC.B issuer
+                ]
+
+instance FromData CoalitionDatum where
+    fromBuiltinData (BuiltinData d) = case d of
+        PLC.Constr 0 [PLC.List shops, PLC.List reifs, PLC.B issuer] -> do
+            ss <- traverse unB shops
+            rs <- traverse unB reifs
+            Just (CoalitionDatum ss rs issuer)
+        _ -> Nothing
+      where
+        unB (PLC.B b) = Just b
+        unB _ = Nothing
+
+{- | Governance redeemer for the coalition-metadata validator.
+
+Aiken:
+
+@
+  Constr 0 [Bytes target_pk, Bytes issuer_sig]  -- AddShop
+  Constr 1 [Bytes target_pk, Bytes issuer_sig]  -- AddReificator
+  Constr 2 [Bytes target_pk, Bytes issuer_sig]  -- RevokeReificator
+@
+-}
+data GovernanceRedeemer
+    = AddShop ByteString ByteString
+    | AddReificator ByteString ByteString
+    | RevokeReificator ByteString ByteString
+
+instance ToData GovernanceRedeemer where
+    toBuiltinData r = BuiltinData $ case r of
+        AddShop tgt sig -> PLC.Constr 0 [PLC.B tgt, PLC.B sig]
+        AddReificator tgt sig -> PLC.Constr 1 [PLC.B tgt, PLC.B sig]
+        RevokeReificator tgt sig -> PLC.Constr 2 [PLC.B tgt, PLC.B sig]
+
+instance FromData GovernanceRedeemer where
+    fromBuiltinData (BuiltinData d) = case d of
+        PLC.Constr 0 [PLC.B tgt, PLC.B sig] -> Just (AddShop tgt sig)
+        PLC.Constr 1 [PLC.B tgt, PLC.B sig] -> Just (AddReificator tgt sig)
+        PLC.Constr 2 [PLC.B tgt, PLC.B sig] -> Just (RevokeReificator tgt sig)
+        _ -> Nothing
 
 {- | Groth16 proof: three compressed BLS12-381 curve points.
 
