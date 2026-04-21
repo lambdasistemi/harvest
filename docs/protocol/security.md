@@ -78,14 +78,14 @@ Operations where **authorization** is needed but nothing is hidden.
 
 ### Acceptor misdirection
 
-**Attack**: Reificator from acceptor A submits a proof intended for acceptor B.
+**Attack**: A reificator with card A submits a proof intended for card B.
 
-**Defense**: The customer's Ed25519 signature covers `acceptor_pk` inside `signed_data`. Changing `acceptor_pk` invalidates the signature. The validator also checks (milestone 2) that the submitting reificator is registered under `signed_data.acceptor_pk` in the reificator trie.
+**Defense**: The customer's Ed25519 signature covers `acceptor_pk` (the accepting card's Ed25519 public key) inside `signed_data`. Changing `acceptor_pk` invalidates the signature. The validator checks that the transaction is signed by `acceptor_pk` and that `acceptor_pk` is a registered card in the coalition datum.
 
 ```mermaid
 graph TD
-    PROOF["Signed: d=10, acceptor=B, TxOutRef=X"] -->|submit via B's reificator consuming X| OK[Valid]
-    PROOF -->|submit via C's reificator| FAIL[Rejected: reificator not under acceptor B]
+    PROOF["Signed: d=10, acceptor=card_B_ed25519, TxOutRef=X"] -->|submit via card B consuming X| OK[Valid]
+    PROOF -->|submit via card C| FAIL[Rejected: tx not signed by card B]
     PROOF -->|change d to 50| FAIL2[Rejected: Ed25519 signature invalid]
 ```
 
@@ -95,29 +95,42 @@ graph TD
 
 **Defense**: The customer's `pk_c` is a pass-through public input to the Groth16 proof (`pk_c_hi`, `pk_c_lo`). The validator cross-checks the redeemer's `customer_pubkey` matches the proof's `pk_c` inputs. Substituting a different customer key invalidates the proof.
 
-### Stolen reificator
+### Stolen reificator (no card)
 
-**Attack**: Someone steals a reificator and tries to use it.
+**Attack**: Someone steals a reificator without the card inserted.
 
-**Defense**: The stolen device can submit transactions (it has keys), but:
+**Defense**: Zero risk. The reificator holds no identity keys and no secrets. It is a dumb terminal. It cannot sign certificates, cannot sign transactions (as the card's Ed25519 key is needed), and cannot produce cap certificates (the card's Jubjub key is needed). Replace the hardware.
 
-1. The shop revokes the reificator's public key from the on-chain trie.
-2. After revocation, no settlement tx from this device is accepted (trie lookup fails).
-3. The shop reverts all pending entries for the stolen reificator using its master key.
+### Stolen reificator (card inserted)
+
+**Attack**: Someone steals a reificator with the card still inserted.
+
+**Defense**: The card is PIN-protected — N failed attempts lock it permanently. Even if the thief knows the PIN:
+
+1. The shop revokes the card's public keys from the coalition datum on-chain.
+2. After revocation, no settlement tx from this card is accepted (card lookup fails).
+3. The shop reverts all pending entries for the stolen card using its master key.
 4. Customer spend counters are restored.
+5. Shop inserts a spare card from the safe into any reificator. Service resumes immediately.
 
 ```mermaid
 sequenceDiagram
     participant S as Shop (master key)
     participant L1 as On-Chain
-    participant THIEF as Stolen Device
+    participant THIEF as Stolen Device + Card
 
-    S->>L1: remove reificator_pk from trie
-    THIEF->>L1: settlement tx
-    L1->>L1: reificator_pk not found → REJECT
-    S->>L1: revert all pending entries for this reificator_pk
+    S->>L1: remove card (jubjub_pk, ed25519_pk) from coalition datum
+    THIEF->>L1: settlement tx (signed by stolen card)
+    L1->>L1: card not registered → REJECT
+    S->>L1: revert all pending entries for this card_ed25519_pk
     Note over L1: spend counters restored
 ```
+
+### No certificate forgery
+
+**Attack**: A stolen reificator attempts to produce unlimited cap certificates.
+
+**Defense**: Cap certificates require the card's Jubjub EdDSA key, which resides on the secure element behind a PIN. Without the card, the reificator cannot produce any certificates — it has no signing keys at all. This is the fundamental security advantage of the card model over burned-in keys.
 
 ### Reificator malfunction
 
@@ -164,7 +177,7 @@ graph LR
 
 | Observer | Learns | Does not learn |
 |----------|--------|---------------|
-| On-chain observer | `d`, `user_id`, `issuer_pk`, `acceptor_pk` (via signed_data), `commit(spent)`, `pk_c` | Cap only; `S_old`/`S_new` are derivable by aggregating public `d` values |
-| Issuer (shop that signed the cap) | Cap they signed, user_id | Other shops' caps, total spent, when/where redeemed |
-| Acceptor (shop where the spend happens) | Amount `d` being redeemed | Cap, total spent, which shop issued the certificate |
+| On-chain observer | `d`, `user_id`, `issuer_jubjub_pk`, `acceptor_ed25519_pk` (via signed_data), `commit(spent)`, `pk_c` | Cap only; `S_old`/`S_new` are derivable by aggregating public `d` values |
+| Issuer (card that signed the cap) | Cap they signed, user_id | Other cards' caps, total spent, when/where redeemed |
+| Acceptor (card whose reificator processes the spend) | Amount `d` being redeemed | Cap, total spent, which card issued the certificate |
 | Data provider | Trie structure, entry existence | Nothing beyond what's on-chain |

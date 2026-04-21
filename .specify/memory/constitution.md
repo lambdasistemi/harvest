@@ -26,19 +26,28 @@ User balances and voucher caps are never revealed on-chain. All on-chain data is
 
 ### V. Proof Soundness
 
-No spend occurs without (a) a valid Groth16 proof that the committed counter has not exceeded the hidden cap, and (b) a customer Ed25519 signature binding the spend to a specific Cardano transaction.
+No spend occurs without (a) a valid Groth16 proof that the committed counter has not exceeded the hidden cap, and (b) a customer Ed25519 signature binding the spend to a specific Cardano transaction and a specific accepting card.
 
 Three bindings, split between the proof and the signature:
 
 1. **Spend amount `d`** — Groth16 public input. Bound by the circuit constraint `S_new = S_old + d`. The customer's Ed25519 signature over `signed_data` cross-includes `d` for defence-in-depth.
-2. **Acceptor `acceptor_pk`** — part of `signed_data` (not a circuit public input). Bound by the customer's Ed25519 signature. The on-chain validator enforces that the submitting reificator belongs to `signed_data.acceptor_pk` (reificator trie).
+2. **Acceptor card `acceptor_pk`** — the Ed25519 public key of the accepting card, included in `signed_data` (not a circuit public input). Bound by the customer's Ed25519 signature. The on-chain validator enforces that the transaction is signed by `acceptor_pk` and that `acceptor_pk` is a registered card in the coalition datum.
 3. **Transaction identity** — the `TxOutRef` the reificator consumes is part of `signed_data` and bound by the Ed25519 signature. A TxOutRef is consumed at most once on-chain, so the signed redeemer can be submitted at most once. This replaces the earlier (abandoned) circuit-level nonce design.
 
 The customer's Ed25519 public key `pk_c` is itself a pass-through public input to the circuit (split as `pk_c_hi`, `pk_c_lo`) — the validator cross-checks it against the redeemer's `customer_pubkey`, preventing an attacker from pairing a stolen proof with a different customer key.
 
-The issuer (shop that signed the cap certificate) and the acceptor (shop where the spend happens) are role labels on coalition members, not separate actor types. Both are shops. Earn at shop A, spend at shop B. The circuit verifies the issuer's signature on the cap. The validator verifies the customer's Ed25519 signature and that the reificator belongs to the chosen acceptor.
+Every card has two key pairs on a single secure element, serving different verification environments:
+
+- **Jubjub EdDSA key** — signs cap certificates. Verified inside the ZK circuit (where `cap` is private and must stay hidden). Appears as `issuer_Ax`/`issuer_Ay` in the circuit's public inputs when the card acts as issuer.
+- **Ed25519 key** — signs Cardano transactions, authenticates the card to customers. Verified by the Plutus validator via `VerifyEd25519Signature`. Appears as `acceptor_pk` in the customer's `signed_data` when the card acts as acceptor.
+
+The two keys exist because two different verification environments (ZK circuit and Plutus validator) support different cryptography. The coalition datum registers both keys together as a pair under the same card identity — preventing mix-and-match attacks.
+
+The **issuer** (card that signed the cap certificate) and the **acceptor** (card that submits the settlement) are per-transaction role labels, not separate actor types. Both are cards belonging to coalition shops. Earn at shop A's card, spend at shop B's card. The circuit verifies the issuer's Jubjub signature on the cap. The validator verifies the customer's Ed25519 signature binding the acceptor and checks the acceptor card is registered.
 
 Circuit public inputs: `[d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]`
+
+`signed_data` layout (74 bytes): `txid (32) || ix (2) || acceptor_pk (32) || d (8)` — where `acceptor_pk` is the accepting card's Ed25519 public key.
 
 A single Groth16 circuit handles issuer signature verification, counter arithmetic, range check, and commitment binding. The customer signature handles per-tx binding. A future extension supports multi-certificate spends (combining caps from multiple issuers in a single proof) — this is core to the value proposition, not an optimization.
 
@@ -52,78 +61,89 @@ Spending and redemption are decoupled in time and space.
 
 #### Terminology
 
-- **Reificator**: A device at a cashing point (shop). Has a signing key, settles proofs on-chain, signs certificates. Stateless — all state is on-chain (pending trie). Screen is dormant between interactions but settlement runs continuously in the background.
+- **Reificator**: A commodity hardware device at a cashing point (shop). Has no keys of its own — it is a dumb terminal with a screen, network interface, and card slot. Stateless — all state is on-chain (pending trie). Screen is dormant between interactions but settlement runs continuously in the background while a card is inserted.
+- **Card**: A PIN-protected smart card with a secure element. Holds two key pairs (Jubjub EdDSA + Ed25519) and is the shop's complete identity. Distributed by the coalition. The card activates the reificator when inserted; without it the reificator is inert.
 - **Reification**: The act of exposing a settled spend to the physical world — the reificator's screen lights up and the casher sees the amount.
-- **Settlement**: The reificator submits the customer's ZK proof on-chain and waits for confirmation. Happens asynchronously, before the customer visits the shop.
+- **Settlement**: The reificator (with card inserted) submits the customer's ZK proof on-chain and waits for confirmation. Happens asynchronously, before the customer visits the shop.
 - **Redemption**: The casher acknowledges the reified amount and applies the discount.
-- **Topup**: The casher loads new reward points. The reificator signs a fresh cap certificate and sends it to the customer's phone.
+- **Topup**: The casher loads new reward points. The card signs a fresh cap certificate (Jubjub EdDSA) and sends it to the customer's phone via the reificator. **Requires the card to be inserted** — the reificator alone cannot issue certificates.
 
-#### Key Ceremony
+#### Card and Key Ceremony
 
-The reificator is a secure hardware device. Two keys are burned in at different times by different authorities:
+The card is a PIN-protected smart card with a secure element. The coalition manufactures cards and registers them on-chain.
 
-1. **Reificator key** — burned in at manufacturing by the coalition/distributor. This is the device's own identity. At ceremony time, the reificator's public key is added to the on-chain reificator trie.
-2. **Shop key** — burned in when the device is installed at a shop. This is the shop's authority for signing cap certificates (issuer_pk in the circuit).
+1. **Coalition manufactures the card** — burns two key pairs into the secure element: a Jubjub EdDSA key (for certificate signing) and an Ed25519 key (for Cardano transactions and customer authentication). The card's public keys are registered in the coalition datum under a shop.
+2. **Shop receives the card** — along with 2-3 spare cards (same shop, different keys). The shop inserts a card into the reificator to activate it. Spare cards are kept in a safe.
+3. **PIN protection** — the secure element locks signing operations behind a PIN. N failed attempts lock the card permanently. A locked card is replaced from the safe and revoked on-chain.
 
-Both keys live in secure hardware. Neither can be extracted. If the device is stolen, the shop's master key (held separately, not on the device) can sign reverts and revoke the reificator from the on-chain trie.
+The reificator has no keys and no secrets. It is interchangeable commodity hardware. A shop's card works in any compatible reificator. Device breaks? Plug the card into a new one. No re-registration needed.
 
-#### Two Signing Roles
+#### Two Key Pairs, One Card
 
-The reificator signs in two capacities:
+Each card holds two key pairs on a single secure element:
 
-1. **As the shop** (issuer): signs cap certificates (`issuer_pk` in the circuit). These are verified inside the ZK proof on-chain.
-2. **As itself** (reificator identity): signs reification certificates, bound to its own identity and a nonce. These are verified at redemption by checking the nonce against the pending trie.
+1. **Jubjub EdDSA key** — signs cap certificates (`issuer_pk` in the circuit). Verified inside ZK proofs. Required because `cap` is private and must remain hidden — only an in-circuit verifier can check the signature without revealing it.
+2. **Ed25519 key** — signs Cardano transactions, authenticates the card to customers, signs reification certificates. Verified by the Plutus validator (`VerifyEd25519Signature`) and by customer phones.
+
+Both keys are registered together in the coalition datum as a pair under the same card identity. The two keys exist because two verification environments (ZK circuit and Plutus validator) support different cryptography.
 
 #### Spend Lifecycle
 
 A spend has three states:
 
 ```
-committed → redeemed  (reificator signs — device confirms physical redemption)
+committed → redeemed  (card signs via reificator — device confirms physical redemption)
          → reverted   (shop signs — business authority reverses the settlement)
 ```
 
-The reificator can redeem but cannot revert. The shop can revert but cannot redeem. Separation of concerns — the physical device handles the happy path, the business authority handles recovery.
+The card (via reificator) can redeem but cannot revert. The shop can revert but cannot redeem. Separation of concerns — the physical device handles the happy path, the business authority handles recovery.
 
 #### Flow
 
-1. **At home**: Customer chooses a spending shop and generates a ZK proof binding both the amount `d` and the shop's public key. Contacts the shop's reificator remotely with the proof.
-2. **Settlement**: Reificator submits the proof on-chain. The spend counter updates and a pending entry is created in the pending trie (committed state).
-3. **Certificate**: Reificator returns a signed reification certificate (with nonce) to the phone.
+1. **At home**: Customer chooses a spending shop and contacts its reificator. The reificator (with card inserted) authenticates via the card's Ed25519 key. Customer verifies the card is registered in the coalition datum. Customer generates a ZK proof binding the amount `d` and the issuer card's Jubjub key, then signs `signed_data` binding the accepting card's Ed25519 public key, a TxOutRef, and `d`.
+2. **Settlement**: Reificator submits the proof on-chain. The validator checks the Groth16 proof, verifies the customer's Ed25519 signature over `signed_data`, confirms `acceptor_pk` is a registered card, and confirms the transaction is signed by `acceptor_pk`. The spend counter updates and a pending entry is created in the pending trie (committed state).
+3. **Certificate**: Card signs a reification certificate (Ed25519, with nonce) via the reificator, returned to the phone.
 4. **At the shop**: Customer reaches the cashing point. Reificator screen is dormant.
-5. **Reification**: Customer presents certificate. Reificator verifies its own signature, queries data provider for Merkle membership proof of the nonce in the pending trie. If valid — switches to present state, displays the spent amount.
-6. **Redemption**: Casher acknowledges, applies the discount. Reificator submits redemption request — pending entry removed from trie (redeemed).
-7. **Topup**: Casher sets new reward amount. Reificator signs a fresh cap certificate for the shop, sends to phone.
-8. **Dormant**: Reificator screen goes dormant. Background settlement continues.
+5. **Reification**: Customer presents certificate. Reificator verifies the card's signature, queries data provider for Merkle membership proof of the nonce in the pending trie. If valid — switches to present state, displays the spent amount.
+6. **Redemption**: Casher acknowledges, applies the discount. Reificator submits redemption request (signed by card) — pending entry removed from trie (redeemed).
+7. **Topup**: Casher sets new reward amount. Card signs a fresh cap certificate (Jubjub EdDSA), sent to the phone via the reificator. **Requires the card to be inserted.**
+8. **Dormant**: Reificator screen goes dormant. Background settlement continues (only while card is inserted).
 
 #### Device Loss / Theft
 
-If a reificator is stolen or destroyed:
+**Reificator stolen (card not inserted):** Zero risk. The reificator holds no keys and no secrets. It is inert without a card. Replace the hardware.
 
-1. Shop removes the reificator's public key from the on-chain reificator trie (revocation).
-2. Shop walks the stolen reificator's subtree in the pending trie.
+**Reificator stolen (card inserted):** The thief has a functioning device with signing capability. The card is PIN-protected — N failed attempts lock it permanently. Recovery:
+
+1. Shop revokes the card's public keys from the coalition datum on-chain.
+2. Shop walks the card's subtree in the pending trie.
 3. Shop signs reverts for all committed-but-unredeemed entries — spend counters are rolled back, pending entries removed.
-4. Affected customers' on-chain state is restored. They can re-spend through a different reificator.
+4. Affected customers' on-chain state is restored. They can re-spend through a different card.
+5. Shop inserts a spare card into a new (or the same) reificator. No re-registration needed for the reificator — only the card identity matters.
+
+**Card lost or locked:** Replace from the safe. Revoke the old card on-chain. Insert the spare into any reificator.
 
 #### Security Properties
 
 - **No double-spend**: Settlement happens before the customer visits the shop. On-chain confirmation has minutes/hours, not seconds.
-- **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. No party can alter it without invalidating the proof.
-- **No shop misdirection**: The ZK proof binds the spending shop's public key. The on-chain validator checks that the submitting reificator is registered under that shop in the reificator trie. A proof generated for shop B cannot be submitted by shop A's reificator.
+- **No amount tampering**: The ZK proof binds the spend amount `d` as a public input. No party can alter it without invalidating the proof. The customer's Ed25519 signature cross-binds `d` in `signed_data`.
+- **No acceptor misdirection**: The customer's Ed25519 signature binds `acceptor_pk` (the accepting card's Ed25519 public key) in `signed_data`. The on-chain validator enforces that the transaction is signed by `acceptor_pk` and that `acceptor_pk` is a registered card. A proof intended for card B cannot be submitted by card A.
 - **No certificate replay**: Reification certificates carry nonces. Each nonce maps to a pending trie entry on-chain, consumed on redemption.
-- **Reificator-bound**: Reification certificates are redeemable only at the reificator that issued them.
-- **Recoverable**: Stolen, destroyed, or malfunctioning devices cannot prevent recovery. The shop's master key can revert all pending entries. The pending trie provides on-chain evidence for the shop to act on.
-- **Threat model**: The protocol protects against device failure (malfunction, theft, vandalism), not against malicious shops. The shop is assumed cooperative — it has every incentive to serve its customers. Collusion between shop and reificator is outside the threat model.
+- **Card-bound**: Reification certificates are signed by the card's Ed25519 key and redeemable only at a reificator with that card inserted.
+- **No certificate forgery**: Cap certificates require the card's Jubjub EdDSA key (inside the secure element, behind a PIN). A stolen reificator without the card cannot produce certificates — it has no signing keys at all.
+- **Recoverable**: Stolen or malfunctioning devices cannot prevent recovery. The shop revokes the card on-chain and reverts pending entries with the master key. Spare cards from the safe restore service immediately.
+- **Threat model**: The protocol protects against device failure (malfunction, theft, vandalism), not against malicious shops. The shop is assumed cooperative — it has every incentive to serve its customers. Theft of an active reificator with card inserted is mitigated by PIN protection and on-chain revocation.
 
 #### State
 
 | Location | What it holds |
 |----------|--------------|
-| **On-chain — spend trie** | issuer → user → commit(spent) |
-| **On-chain — reificator trie** | shop → reificator_pk (authorized devices) |
-| **On-chain — pending trie** | reificator_pk → nonce → {user_id, amount} |
-| **User's phone** | User secret, spend randomness, cap certificates (signed by shop key), reification certificates (signed by reificator key) |
-| **Reificator** | Reificator key (burned by distributor), shop key (burned by shop), Cardano payment key + UTXO for fees. Stateless — no local data beyond keys. |
+| **On-chain — spend trie** | issuer_card → user → commit(spent) |
+| **On-chain — card trie** | shop → card_pk pair (jubjub_pk, ed25519_pk) |
+| **On-chain — pending trie** | card_ed25519_pk → nonce → {user_id, amount} |
+| **User's phone** | User secret, Ed25519 keypair (`sk_c`, `pk_c`), spend randomness, cap certificates (signed by card's Jubjub key), reification certificates (signed by card's Ed25519 key) |
+| **Card (secure element)** | Jubjub EdDSA keypair + Ed25519 keypair, PIN-protected |
+| **Reificator** | Cardano payment key + UTXO for fees. No identity keys — all signing delegated to the inserted card. Stateless commodity hardware. |
 
 ### VIII. Economic Model
 
@@ -131,12 +151,12 @@ The costs flow downward from coalition to shop:
 
 | Actor | Responsibility | Cost |
 |-------|---------------|------|
-| **Coalition** | Publishes trie roots off-chain | Minimal — just root publication |
+| **Coalition** | Publishes trie roots off-chain, manufactures cards | Minimal — root publication + card production |
 | **Data providers** | Serve Merkle proofs to reificators (untrusted, verifiable against on-chain root) | Paid per query by reificators |
 | **Reificators** | Query providers for proofs, build and submit transactions | Paid from the device's UTXO |
 | **Shops** | Fund their reificators' UTXOs with ADA | Cost of doing business (like card processing fees) |
 
-The shop refills the reificator's UTXO. The reificator spends from it for transaction fees and data provider queries. The busier the reificator, the more the shop pays. Data providers compete on price and availability — the market sets the cost.
+The shop refills the reificator's UTXO. Each card's Ed25519 public key derives a Cardano address visible in the coalition datum — the shop knows exactly which address to top up. The reificator spends from it for transaction fees and data provider queries. The busier the reificator, the more the shop pays. Data providers compete on price and availability — the market sets the cost.
 
 Fee deduction from loyalty points (converting points to ADA on-chain) is a future optimization, not a day-one requirement.
 
@@ -146,9 +166,9 @@ Fee deduction from loyalty points (converting points to ADA on-chain) is a futur
 
 | Trie | Structure | Purpose |
 |------|-----------|---------|
-| **Spend trie** | issuer → user → commit(spent) | Tracks cumulative spending per user per issuer |
-| **Reificator trie** | shop → reificator_pk | Authorized devices, managed by shops |
-| **Pending trie** | reificator_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
+| **Spend trie** | issuer_card → user → commit(spent) | Tracks cumulative spending per user per issuer card |
+| **Card trie** | shop → (jubjub_pk, ed25519_pk) | Registered cards, managed by coalition. Each entry is a key pair under a shop identity |
+| **Pending trie** | card_ed25519_pk → nonce → {user_id, amount} | Committed-but-unredeemed spends |
 
 The full trie data lives off-chain, published by the coalition. Untrusted data providers serve Merkle proofs verified against the on-chain root. The on-chain validator checks the Merkle proof in each transaction's redeemer and outputs a new root UTXO with the updated hash.
 
@@ -156,19 +176,19 @@ The full trie data lives off-chain, published by the coalition. Untrusted data p
 
 | Artefact | Structure | Replaces |
 |----------|-----------|----------|
-| **Coalition-metadata UTxO** (reference input) | `CoalitionDatum { issuer_pk, shop_pks : Set pk, reificator_pks : Set pk }` | Reificator trie + coalition registry |
-| **Per-customer script UTxO** (one per customer) | `VoucherDatum { user_id, commit_spent, shop_pk, reificator_pk }` | Spend trie (one entry per UTxO) + Pending trie (present = committed, absent = redeemed/reverted) |
+| **Coalition-metadata UTxO** (reference input) | `CoalitionDatum { issuer_pk, cards : Map shop_pk [(jubjub_pk, ed25519_pk)] }` | Card trie + coalition registry |
+| **Per-customer script UTxO** (one per customer) | `VoucherDatum { user_id, commit_spent, card_ed25519_pk }` | Spend trie (one entry per UTxO) + Pending trie (present = committed, absent = redeemed/reverted) |
 
 Every security invariant of §V–§VII holds over the prototype form at N ∈ {1, 2, 3} with the same check structure (enforced in-validator rather than as a Merkle proof). The prototype form is wire-incompatible with the production form; migration from one to the other is tracked as a refinement obligation under issues #5 (MPF on-chain) and #8 (MPFS mediation). The prototype is correct and complete at small N; it is **not** operationally usable at scale — that is by design (Principle X).
 
 Every spend involves two on-chain transactions:
 
-1. **Settlement tx**: updates the spend trie (counter goes up) and inserts into the pending trie. Submitted by the reificator, includes the Groth16 proof.
-2. **Redemption tx**: removes the entry from the pending trie. Submitted by the reificator after physical redemption, signed by the reificator key. No ZK proof needed.
+1. **Settlement tx**: updates the spend trie (counter goes up) and inserts into the pending trie. Submitted by the reificator (card signs the transaction via Ed25519), includes the Groth16 proof. The validator checks that `acceptor_pk` from `signed_data` is a registered card and that the transaction is signed by that card.
+2. **Redemption tx**: removes the entry from the pending trie. Submitted by the reificator after physical redemption, signed by the card's Ed25519 key. No ZK proof needed.
 
 A revert is a single transaction: removes from the pending trie and rolls back the spend trie. Signed by the shop's master key.
 
-Topup is off-chain only — the shop signs a new cap certificate, no transaction. This is deliberate: topups are high-frequency, low-value (a few euros of rewards). Spends are low-frequency, high-value (30-50+ euros) — two transactions are economically negligible.
+Topup is off-chain only — the card signs a new cap certificate (Jubjub EdDSA), no transaction. This is deliberate: topups are high-frequency, low-value (a few euros of rewards). Spends are low-frequency, high-value (30-50+ euros) — two transactions are economically negligible.
 
 ### X. Correct Before Optimized
 
@@ -198,4 +218,4 @@ All dependencies, builds, and CI are Nix-managed. The flake produces all derivat
 
 This constitution supersedes all other practices. Privacy guarantees (Principle IV) and proof soundness (Principle V) cannot be weakened. The coalition model (Principle I) is the project's reason for existence.
 
-**Version**: 4.1.0 | **Ratified**: 2026-04-16 | **Last Amended**: 2026-04-20 (Principle IX prototype carve-out)
+**Version**: 5.0.0 | **Ratified**: 2026-04-16 | **Last Amended**: 2026-04-21 (Card-based identity model — §V, §VII, §VIII, §IX)

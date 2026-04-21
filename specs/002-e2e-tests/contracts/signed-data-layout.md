@@ -2,37 +2,43 @@
 
 **Status**: Authoritative. Any disagreement between this document, the Node signer (`circuits/lib/customer_sig.js`), the Aiken validator (`onchain/validators/voucher_spend.ak`), and the Haskell parsing check (`offchain/test/SignedDataLayoutSpec.hs`) is a bug in one of the implementations — this document wins.
 
-## Total size: 106 bytes
+## Total size: 74 bytes
 
 All multi-byte integer fields are **big-endian**, unsigned, fixed-width, with no padding between fields.
+
+`acceptor_pk` is the accepting card's Ed25519 public key (32 bytes), replacing the previous Jubjub coordinate pair (`acceptor_ax` + `acceptor_ay`, 64 bytes). This reduces the layout from 106 to 74 bytes.
 
 | Offset | Length (bytes) | Field | Encoding |
 |--------|----------------|-------|----------|
 | 0      | 32             | `txid`        | Raw 32-byte Cardano transaction id |
 | 32     | 2              | `ix`          | u16 big-endian: output index |
-| 34     | 32             | `acceptor_ax` | 256-bit big-endian unsigned integer, zero-padded to 32 bytes |
-| 66     | 32             | `acceptor_ay` | 256-bit big-endian unsigned integer, zero-padded to 32 bytes |
-| 98     | 8              | `d`           | u64 big-endian: spend amount |
+| 34     | 32             | `acceptor_pk` | Raw 32-byte Ed25519 public key of the accepting card |
+| 66     | 8              | `d`           | u64 big-endian: spend amount |
 
 ## Validator parse (Aiken slice indices, `slice(start, end)` — end inclusive)
 
 ```
-txid        = slice(signed_data, 0,  31)
-ix_bytes    = slice(signed_data, 32, 33)
-acceptor_ax = slice(signed_data, 34, 65)
-acceptor_ay = slice(signed_data, 66, 97)
-d_bytes     = slice(signed_data, 98, 105)
+txid         = slice(signed_data, 0,  31)
+ix_bytes     = slice(signed_data, 32, 33)
+acceptor_pk  = slice(signed_data, 34, 65)
+d_bytes      = slice(signed_data, 66, 73)
 ```
 
 All integer fields are decoded with `bytearray.to_int_big_endian`.
+
+## Validator enforcement
+
+The validator additionally checks:
+
+1. `acceptor_pk` is a registered card in the coalition datum.
+2. The transaction is signed by `acceptor_pk` (Ed25519 extra signatory or required signer).
 
 ## Signer emit (Node offsets, `Buffer.concat`)
 
 ```
 signed_data = txid               // 32 bytes
             || u16be(ix)         // 2 bytes
-            || int256be(acc_ax)  // 32 bytes
-            || int256be(acc_ay)  // 32 bytes
+            || acceptor_pk       // 32 bytes (Ed25519 public key)
             || u64be(d)          // 8 bytes
 ```
 

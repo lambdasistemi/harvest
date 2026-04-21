@@ -10,21 +10,22 @@ this document wins.
 
 ```text
 Constr 0
-  [ Int      -- user_id         (Poseidon hash of user_secret)
-  , Int      -- commit_spent    (current Poseidon commitment S_curr)
-  , Bytes    -- shop_pk         (32 bytes, the shop authorising this entry)
-  , Bytes    -- reificator_pk   (32 bytes, the reificator that submitted the first settlement)
+  [ Int      -- user_id             (Poseidon hash of user_secret)
+  , Int      -- commit_spent        (current Poseidon commitment S_curr)
+  , Bytes    -- card_ed25519_pk     (32 bytes, the accepting card's Ed25519 public key)
   ]
 ```
 
 - `user_id`, `commit_spent` inherit from the #15 `VoucherDatum`.
-- `shop_pk` and `reificator_pk` are **frozen at first settlement** and
-  never change over the lifetime of this UTxO. Subsequent settlements
-  (same customer, same shop, same reificator) re-produce a UTxO
-  with the same role-binding fields and an updated `commit_spent`.
-  If the customer spends at a *different* shop, that shop creates a
-  **separate** per-customer UTxO with its own binding — the two UTxOs
+- `card_ed25519_pk` is the accepting card's Ed25519 key, **frozen at
+  first settlement** and never changed over the lifetime of this UTxO.
+  Subsequent settlements (same customer, same card) re-produce a UTxO
+  with the same `card_ed25519_pk` and an updated `commit_spent`.
+  If the customer spends at a *different* card/shop, that card creates
+  a **separate** per-customer UTxO with its own binding — the two UTxOs
   coexist at the voucher address for the same `user_id`.
+- The shop identity is derived by looking up `card_ed25519_pk` in the
+  coalition datum's cards map — no need to store `shop_pk` separately.
 
 ## Spend redeemer (`Constr 0`, settlement)
 
@@ -40,7 +41,7 @@ Constr 0
   , Int      -- pk_c_lo
   , Bytes    -- customer_pubkey       (32)
   , Bytes    -- customer_signature    (64)
-  , Bytes    -- signed_data           (106)
+  , Bytes    -- signed_data           (74)
   , Groth16Proof
   ]
 ```
@@ -49,8 +50,8 @@ Constr 0
 
 ```text
 Constr 1
-  [ Bytes    -- reificator_sig        (64 bytes)
-              --   Ed25519 sig under datum.reificator_pk
+  [ Bytes    -- card_sig              (64 bytes)
+              --   Ed25519 sig under datum.card_ed25519_pk
               --   over (txid || "REDEEM")
   ]
 ```
@@ -81,22 +82,22 @@ In addition to the three bindings from #15 (`d`, `acceptor_pk`,
 
 1. Exactly one reference input at the coalition-metadata address, with
    a parseable `CoalitionDatum`.
-2. `datum.shop_pk ∈ CoalitionDatum.shop_pks`.
-3. The reificator whose key signs the tx (found via
-   `tx.extra_signatories`) is in `CoalitionDatum.reificator_pks`,
-   **and** matches `datum.reificator_pk`.
-4. Output at this address carries the same `user_id`, `shop_pk`,
-   `reificator_pk` as the input; only `commit_spent` is updated to
+2. `signed_data.acceptor_pk` exists as a registered card (ed25519_pk)
+   in `CoalitionDatum.cards` (under any shop).
+3. The transaction is signed by `signed_data.acceptor_pk` (found via
+   `tx.extra_signatories`), **and** matches `datum.card_ed25519_pk`.
+4. Output at this address carries the same `user_id`,
+   `card_ed25519_pk` as the input; only `commit_spent` is updated to
    `commit_spent_new`.
 
 ## Validator checks — redemption
 
 1. Coalition reference input present; parseable.
-2. `datum.reificator_pk ∈ CoalitionDatum.reificator_pks` — a revoked
-   reificator cannot redeem.
-3. Exactly one `extra_signatory` equals `datum.reificator_pk`.
-4. `VerifyEd25519Signature(datum.reificator_pk,
-   txid || "REDEEM", redeemer.reificator_sig)` returns `True`.
+2. `datum.card_ed25519_pk` exists as a registered card in
+   `CoalitionDatum.cards` — a revoked card cannot redeem.
+3. Exactly one `extra_signatory` equals `datum.card_ed25519_pk`.
+4. `VerifyEd25519Signature(datum.card_ed25519_pk,
+   txid || "REDEEM", redeemer.card_sig)` returns `True`.
 5. **No output** at this script address with this `user_id` (the
    entry is being removed). This is enforced by scanning
    `tx.outputs` and rejecting if any output sits at this address
@@ -105,14 +106,16 @@ In addition to the three bindings from #15 (`d`, `acceptor_pk`,
 ## Validator checks — revert
 
 1. Coalition reference input present; parseable.
-2. `datum.shop_pk ∈ CoalitionDatum.shop_pks`.
-3. Exactly one `extra_signatory` equals `datum.shop_pk`.
-4. `VerifyEd25519Signature(datum.shop_pk,
+2. The shop that owns `datum.card_ed25519_pk` is looked up in
+   `CoalitionDatum.cards`. The shop's master key (`shop_pk`) is the
+   map key under which the card is registered.
+3. Exactly one `extra_signatory` equals that `shop_pk`.
+4. `VerifyEd25519Signature(shop_pk,
    txid || "REVERT" || prior_bytes, redeemer.shop_sig)`.
 5. Either:
    - (full removal) no output at this address with this `user_id`, or
    - (rollback) one output at this address with same `user_id`,
-     same `shop_pk`, same `reificator_pk`, and
+     same `card_ed25519_pk`, and
      `commit_spent = redeemer.prior_commit_spent`.
    The validator accepts whichever branch the tx presents; it does
    not discriminate them beyond structural validity. Economic
@@ -121,10 +124,10 @@ In addition to the three bindings from #15 (`d`, `acceptor_pk`,
 
 ## Negative scenarios covered by Story 4 / edge cases
 
-- Redemption after the reificator is revoked → rejected by check 2
+- Redemption after the card is revoked → rejected by check 2
   of redemption.
 - Revert signed by a non-shop key → rejected by check 3 of revert.
-- Settlement after reificator revocation → rejected by check 3 of
+- Settlement after card revocation → rejected by check 2/3 of
   settlement.
 - Redemption that also produces a replacement UTxO at the same
   address → rejected by check 5 of redemption.

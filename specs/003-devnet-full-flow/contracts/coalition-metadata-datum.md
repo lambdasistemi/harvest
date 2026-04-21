@@ -14,23 +14,21 @@ new one and the refinement relation is stated there.
 
 ```text
 Constr 0
-  [ List (Bytes)    -- shop_pks         (unique 32-byte Ed25519 pks)
-  , List (Bytes)    -- reificator_pks   (unique 32-byte Ed25519 pks)
-  , Bytes           -- issuer_pk        (32-byte Ed25519 pk)
+  [ Map (Bytes -> List (Constr 0 [Bytes, Bytes]))
+                        -- cards: shop_pk -> [(jubjub_pk, ed25519_pk)]
+  , Bytes               -- issuer_pk (32-byte Ed25519 pk, coalition authority)
   ]
 ```
 
-**Canonical ordering**: both lists are sorted lexicographically (byte
-order). Governance transitions preserve the ordering; the validator
-checks `sorted(shop_pks) && sorted(reificator_pks)` and rejects
-otherwise. This removes redeemer ambiguity and makes equality checks
-cheap.
+Each entry in the `cards` map associates a shop's public key with a list of registered card pairs. Each card pair contains:
+- `jubjub_pk` (32 bytes) — the card's Jubjub EdDSA public key (signs cap certificates, verified in ZK circuit)
+- `ed25519_pk` (32 bytes) — the card's Ed25519 public key (signs transactions and reification certificates, verified by Plutus validator)
 
-**Uniqueness**: both lists are sets. The validator rejects any output
-datum where consecutive entries are equal.
+**Canonical ordering**: the outer map keys (shop_pks) are sorted lexicographically. Within each shop, card pairs are sorted by `ed25519_pk`. Governance transitions preserve ordering; the validator rejects violations.
 
-**Immutability**: `issuer_pk` is frozen at coalition-create time. Any
-governance redeemer that tries to modify it is rejected.
+**Uniqueness**: no duplicate `ed25519_pk` or `jubjub_pk` across the entire datum. The validator rejects any output datum with duplicates. This prevents mix-and-match attacks — each key belongs to exactly one card identity.
+
+**Immutability**: `issuer_pk` is frozen at coalition-create time. Any governance redeemer that tries to modify it is rejected.
 
 ## Governance redeemer
 
@@ -42,14 +40,16 @@ Constr 0    -- AddShop
   , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x00 || target_pk)
   ]
 
-Constr 1    -- AddReificator
-  [ Bytes   -- target reificator_pk (32)
-  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x01 || target_pk)
+Constr 1    -- AddCard
+  [ Bytes   -- shop_pk (32) — the shop this card belongs to
+  , Bytes   -- card_jubjub_pk (32)
+  , Bytes   -- card_ed25519_pk (32)
+  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x01 || shop_pk || jubjub_pk || ed25519_pk)
   ]
 
-Constr 2    -- RevokeReificator
-  [ Bytes   -- target reificator_pk (32)
-  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x02 || target_pk)
+Constr 2    -- RevokeCard
+  [ Bytes   -- card_ed25519_pk (32) — identifies the card to revoke
+  , Bytes   -- issuer_sig (64) over (serialise(own_ref) || 0x02 || card_ed25519_pk)
   ]
 ```
 
@@ -70,10 +70,11 @@ protection for free.
 4. `VerifyEd25519Signature(issuer_pk, serialise(own_ref) || op_tag ||
    target_pk, issuer_sig)` returns `True`, where `own_ref` is the
    `OutputReference` of the coalition input being spent.
-5. For `AddShop` / `AddReificator`: the target is not already in the
-   list.
-6. For `RevokeReificator`: the target is in the list. (Revocation of
-   an absent key is a no-op and is rejected — keeps the tx narrative
+5. For `AddShop`: the shop_pk is not already a key in the cards map.
+6. For `AddCard`: the shop_pk exists in the cards map; neither
+   `jubjub_pk` nor `ed25519_pk` appears anywhere in the datum.
+7. For `RevokeCard`: the `card_ed25519_pk` exists under some shop.
+   (Revocation of an absent card is rejected — keeps the tx narrative
    honest.)
 
 ## Settlement-side consumption (reference input)
@@ -84,9 +85,9 @@ UTxO without consuming it (CIP-31). Each of those validators:
 1. Locates the coalition UTxO in `tx.reference_inputs` by address.
 2. Parses its datum under this contract.
 3. Enforces the membership check specific to that transaction
-   (settlement: reificator_pk ∈ reificator_pks ∧ shop_pk ∈ shop_pks;
-   redemption: reificator_pk ∈ reificator_pks; revert: shop_pk ∈
-   shop_pks).
+   (settlement: acceptor_pk ∈ cards (any shop) ∧ tx signed by
+   acceptor_pk; redemption: card_ed25519_pk ∈ cards; revert:
+   shop_pk ∈ cards map keys).
 
 If the coalition reference input is absent or malformed, every
 downstream validator rejects. This is the prototype's analogue of

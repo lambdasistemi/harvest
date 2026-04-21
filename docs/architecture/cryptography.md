@@ -27,10 +27,10 @@ graph LR
 | `commit_S_old` | field element | Old counter commitment |
 | `commit_S_new` | field element | New counter commitment |
 | `user_id` | field element | `Poseidon(user_secret)` |
-| `issuer_Ax`, `issuer_Ay` | field elements | Issuer's EdDSA public key (shop that signed the cap) |
+| `issuer_Ax`, `issuer_Ay` | field elements | Issuer card's Jubjub EdDSA public key (card that signed the cap certificate) |
 | `pk_c_hi`, `pk_c_lo` | field elements | Customer's Ed25519 public key, split across two field elements (pass-through; bound by proof so the validator can cross-check the redeemer-supplied `customer_pubkey`) |
 
-The acceptor's public key is **not** a circuit public input. Its binding to the spend is achieved off-chain by the customer's Ed25519 signature over the redeemer's `signed_data`, verified on-chain via Plutus's `VerifyEd25519Signature` builtin.
+The acceptor card's Ed25519 public key is **not** a circuit public input. Its binding to the spend is achieved off-chain by the customer's Ed25519 signature over the redeemer's `signed_data`, verified on-chain via Plutus's `VerifyEd25519Signature` builtin. The validator additionally checks that `acceptor_pk` is a registered card in the coalition datum and that the transaction is signed by `acceptor_pk`.
 
 ### Circuit Private Inputs
 
@@ -58,9 +58,9 @@ graph TD
     style VALID fill:#354,stroke:#698
 ```
 
-## Signature Scheme: EdDSA-Poseidon on Jubjub
+## Signature Scheme: EdDSA-Poseidon on Jubjub (In-Circuit)
 
-Certificates are signed using EdDSA with Poseidon hash on the Jubjub curve (twisted Edwards curve over the BLS12-381 scalar field).
+Cap certificates are signed using EdDSA with Poseidon hash on the Jubjub curve (twisted Edwards curve over the BLS12-381 scalar field). This signature is produced by the card's Jubjub EdDSA key and verified **inside** the ZK circuit.
 
 | Parameter | Value |
 |-----------|-------|
@@ -105,7 +105,7 @@ Per-transaction binding of the spending data to a specific Cardano tx is handled
 | Field | Purpose |
 |-------|---------|
 | `sk_c`, `pk_c` | Customer's Ed25519 signing keypair, held on the phone alongside `user_secret` |
-| `signed_data` | Canonical byte layout: `txid‖ix‖acceptor_Ax‖acceptor_Ay‖d` (106 bytes) |
+| `signed_data` | Canonical byte layout: `txid (32) ‖ ix (2) ‖ acceptor_pk (32) ‖ d (8)` — 74 bytes. `acceptor_pk` is the accepting card's Ed25519 public key |
 | `customer_signature` | Ed25519 signature of `signed_data` under `sk_c` |
 
 ### Why Ed25519 outside instead of Poseidon inside?
@@ -120,7 +120,7 @@ Per-transaction binding of the spending data to a specific Cardano tx is handled
 | Binding | Mechanism |
 |---------|-----------|
 | `d` | Public input + circuit constraint `S_new = S_old + d` |
-| `acceptor_pk` | Ed25519 signature over `signed_data` |
+| `acceptor_pk` (card's Ed25519 key) | Ed25519 signature over `signed_data` + validator checks card is registered and tx is signed by it |
 | TxOutRef / replay protection | Ed25519 signature + validator checks TxOutRef consumed in this tx |
 | `user_id` | Public input + circuit proves `user_id = Poseidon(user_secret)` |
 | `pk_c` | Public input (pass-through) + cross-checked against redeemer's `customer_pubkey` |
