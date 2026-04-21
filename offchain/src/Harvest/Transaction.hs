@@ -1,7 +1,8 @@
--- | Build voucher spend and redeem transactions using the TxBuild DSL.
+-- | Build voucher spend, redeem, and revert transactions using the TxBuild DSL.
 module Harvest.Transaction (
     spendVoucher,
     redeemVoucher,
+    revertVoucher,
 ) where
 
 import Cardano.Ledger.Address (Addr)
@@ -24,7 +25,9 @@ import Data.Word (Word32)
 import Harvest.Types (
     Groth16Proof,
     RedeemRedeemer (..),
+    RevertRedeemer (..),
     SpendRedeemer (..),
+    VoucherAction (..),
     VoucherDatum (..),
  )
 
@@ -52,7 +55,7 @@ spendVoucher ::
     TxIn ->
     -- | Reificator key hash (for requireSignature)
     KeyHash Guard ->
-    -- | The voucher_spend validator script
+    -- | The unified voucher validator script
     AlonzoScript ConwayEra ->
     -- | Script address (where the output goes back)
     Addr ->
@@ -119,18 +122,20 @@ spendVoucher
         spendIdx <-
             spendScript
                 userUtxo
-                SpendRedeemer
-                    { srD = d
-                    , srCommitSpentNew = commitNew
-                    , srIssuerAx = issuerAx
-                    , srIssuerAy = issuerAy
-                    , srPkcHi = pkcHi
-                    , srPkcLo = pkcLo
-                    , srCustomerPubkey = customerPubkey
-                    , srCustomerSignature = customerSignature
-                    , srSignedData = signedData
-                    , srProof = proof
-                    }
+                ( VaSpend
+                    SpendRedeemer
+                        { srD = d
+                        , srCommitSpentNew = commitNew
+                        , srIssuerAx = issuerAx
+                        , srIssuerAy = issuerAy
+                        , srPkcHi = pkcHi
+                        , srPkcLo = pkcLo
+                        , srCustomerPubkey = customerPubkey
+                        , srCustomerSignature = customerSignature
+                        , srSignedData = signedData
+                        , srProof = proof
+                        }
+                )
         -- Output back to the script address with updated datum
         outIdx <-
             payTo'
@@ -162,7 +167,7 @@ redeemVoucher ::
     TxIn ->
     -- | Reificator key hash (for requireSignature)
     KeyHash Guard ->
-    -- | The voucher_redeem validator script
+    -- | The unified voucher validator script
     AlonzoScript ConwayEra ->
     -- | Reificator's Ed25519 signature over (txid || "REDEEM")
     ByteString ->
@@ -181,6 +186,73 @@ redeemVoucher
         requireSignature reificatorKeyHash
         spendScript
             voucherUtxo
-            RedeemRedeemer
-                { rrReificatorSig = reificatorSig
-                }
+            ( VaRedeem
+                RedeemRedeemer
+                    { rrReificatorSig = reificatorSig
+                    }
+            )
+
+{- | Build a voucher revert transaction.
+
+The shop master key holder rolls back or fully removes a voucher
+entry. The shop signs @own_ref.transaction_id || "REVERT" ||
+prior_commit_spent_bytes@ (70 bytes). Two branches:
+
+  * __Rollback__: one output with the same @user_id@, @shop_pk@,
+    @reificator_pk@ and @commit_spent = prior_commit_spent@.
+  * __Full removal__: no output at the script address (entry destroyed).
+
+The TxBuild program does not include fee balancing — call @build@
+from "Cardano.Node.Client.TxBuild" to balance and finalize.
+-}
+revertVoucher ::
+    -- | Voucher UTxO to revert (script-locked with VoucherDatum)
+    TxIn ->
+    -- | Collateral UTXO (from the shop's wallet)
+    TxIn ->
+    -- | Coalition-metadata UTxO (reference input)
+    TxIn ->
+    -- | Shop master key hash (for requireSignature)
+    KeyHash Guard ->
+    -- | The unified voucher validator script
+    AlonzoScript ConwayEra ->
+    -- | prior_commit_spent (the commitment to roll back to)
+    Integer ->
+    -- | Shop master's Ed25519 signature over (txid || "REVERT" || prior_bytes)
+    ByteString ->
+    -- | Script address (where the rollback output goes; ignored for full removal)
+    Maybe
+        ( Addr
+        , MaryValue
+        , VoucherDatum
+        ) ->
+    -- | (input index, maybe output index)
+    TxBuild q e (Word32, Maybe Word32)
+revertVoucher
+    voucherUtxo
+    collateralUtxo
+    coalitionRefUtxo
+    shopKeyHash
+    script
+    priorCommitSpent
+    shopSig
+    mOutput = do
+        attachScript script
+        collateral collateralUtxo
+        reference coalitionRefUtxo
+        requireSignature shopKeyHash
+        spendIdx <-
+            spendScript
+                voucherUtxo
+                ( VaRevert
+                    RevertRedeemer
+                        { rvPriorCommitSpent = priorCommitSpent
+                        , rvShopSig = shopSig
+                        }
+                )
+        mOutIdx <- case mOutput of
+            Nothing -> pure Nothing
+            Just (addr, val, dat) -> do
+                outIdx <- payTo' addr val dat
+                pure (Just outIdx)
+        pure (spendIdx, mOutIdx)

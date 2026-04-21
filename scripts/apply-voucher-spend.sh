@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Apply both parameters (vk + coalition_hash) to the voucher_spend blueprint
+# Apply both parameters (vk + coalition_hash) to the voucher_validator blueprint
 # and write the applied script hex to the test fixtures directory.
+#
+# The unified voucher_validator handles spend, redeem, and revert — all
+# share the same applied script and address.
 #
 # Prerequisites:
 #   - `aiken` in PATH
@@ -22,7 +25,6 @@ echo "Building Aiken validators..."
 (cd "$ONCHAIN" && aiken build)
 
 # Step 2: Get the coalition-metadata script hash from plutus.json
-# The hash is stored directly in the blueprint.
 COALITION_HASH=$(jq -r '.validators[] | select(.title == "coalition_metadata.coalition_metadata.spend") | .hash' "$ONCHAIN/plutus.json")
 echo "Coalition-metadata script hash: $COALITION_HASH"
 
@@ -43,14 +45,14 @@ echo "Coalition hash CBOR: $COALITION_HASH_CBOR"
 # modification — aiken v1.1.21 silently fails with the dotted title
 # form when the VK is large.
 echo "Applying VK parameter..."
-(cd "$ONCHAIN" && aiken blueprint apply -m voucher_spend -v voucher_spend "$VK_HEX" -o plutus.json)
+(cd "$ONCHAIN" && aiken blueprint apply -m voucher_validator -v voucher_validator "$VK_HEX" -o plutus.json)
 
 # Step 6: Apply second parameter (coalition_hash) to the partially-applied blueprint
 echo "Applying coalition_hash parameter..."
-(cd "$ONCHAIN" && aiken blueprint apply -m voucher_spend -v voucher_spend "$COALITION_HASH_CBOR" -o plutus.json)
+(cd "$ONCHAIN" && aiken blueprint apply -m voucher_validator -v voucher_validator "$COALITION_HASH_CBOR" -o plutus.json)
 
 # Step 7: Extract the applied compiled code and write to fixture
-APPLIED=$(jq -r '.validators[] | select(.title == "voucher_spend.voucher_spend.spend") | .compiledCode' "$ONCHAIN/plutus.json")
+APPLIED=$(jq -r '.validators[] | select(.title == "voucher_validator.voucher_validator.spend") | .compiledCode' "$ONCHAIN/plutus.json")
 echo "$APPLIED" > "$FIXTURES/applied-voucher-spend.hex"
 echo "Written to: $FIXTURES/applied-voucher-spend.hex"
 echo "Size: $(wc -c < "$FIXTURES/applied-voucher-spend.hex") bytes"

@@ -1,8 +1,10 @@
 -- | Voucher on-chain types with ToData / FromData instances matching the Aiken encoding.
 module Harvest.Types (
     VoucherDatum (..),
+    VoucherAction (..),
     SpendRedeemer (..),
     RedeemRedeemer (..),
+    RevertRedeemer (..),
     Groth16Proof (..),
     CoalitionDatum (..),
     GovernanceRedeemer (..),
@@ -94,9 +96,33 @@ instance FromData GovernanceRedeemer where
         PLC.Constr 2 [PLC.B tgt, PLC.B sig] -> Just (RevokeReificator tgt sig)
         _ -> Nothing
 
+{- | Unified voucher redeemer matching the Aiken @VoucherAction@ sum type.
+
+Encoding (inline fields, no nesting):
+
+@
+  VaSpend  sr → Constr 0 [sr fields...]
+  VaRedeem rr → Constr 1 [rr fields...]
+  VaRevert rv → Constr 2 [rv fields...]
+@
+-}
+data VoucherAction
+    = VaSpend SpendRedeemer
+    | VaRedeem RedeemRedeemer
+    | VaRevert RevertRedeemer
+
+instance ToData VoucherAction where
+    toBuiltinData (VaSpend sr) =
+        -- SpendRedeemer already encodes as Constr 0; inline its fields
+        toBuiltinData sr
+    toBuiltinData (VaRedeem (RedeemRedeemer sig)) =
+        BuiltinData $ PLC.Constr 1 [PLC.B sig]
+    toBuiltinData (VaRevert (RevertRedeemer prior sig)) =
+        BuiltinData $ PLC.Constr 2 [PLC.I prior, PLC.B sig]
+
 {- | Redeemer for a redemption transaction.
 
-Aiken: @Constr 0 [Bytes reificator_sig]@
+Aiken: @Constr 1 [Bytes reificator_sig]@ (inside VoucherAction)
 
 The reificator signs @own_ref.transaction_id || "REDEEM"@ (38 bytes)
 under the datum's @reificator_pk@.
@@ -114,6 +140,34 @@ instance ToData RedeemRedeemer where
 instance FromData RedeemRedeemer where
     fromBuiltinData (BuiltinData d) = case d of
         PLC.Constr 0 [PLC.B sig] -> Just (RedeemRedeemer sig)
+        _ -> Nothing
+
+{- | Redeemer for a revert transaction.
+
+Aiken: @Constr 0 [Int prior_commit_spent, Bytes shop_sig]@
+
+The shop master signs @own_ref.transaction_id || "REVERT" ||
+prior_commit_spent_bytes@ (70 bytes) under the datum's @shop_pk@,
+authorising a rollback or full removal.
+
+@prior_commit_spent_bytes@ is 32 bytes big-endian zero-padded.
+-}
+data RevertRedeemer = RevertRedeemer
+    { rvPriorCommitSpent :: Integer
+    -- ^ Poseidon commitment to roll back to
+    , rvShopSig :: ByteString
+    -- ^ Ed25519 signature (64 bytes)
+    }
+
+instance ToData RevertRedeemer where
+    toBuiltinData (RevertRedeemer prior sig) =
+        BuiltinData $
+            PLC.Constr 0 [PLC.I prior, PLC.B sig]
+
+instance FromData RevertRedeemer where
+    fromBuiltinData (BuiltinData d) = case d of
+        PLC.Constr 0 [PLC.I prior, PLC.B sig] ->
+            Just (RevertRedeemer prior sig)
         _ -> Nothing
 
 {- | Groth16 proof: three compressed BLS12-381 curve points.

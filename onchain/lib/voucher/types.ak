@@ -1,4 +1,4 @@
-/// Voucher spend types for Groth16-verified private balance.
+/// Voucher types for the unified voucher validator.
 
 /// Groth16 proof: three curve points.
 pub type Groth16Proof {
@@ -39,49 +39,61 @@ pub type VoucherDatum {
   reificator_pk: ByteArray,
 }
 
-/// Redeemer for a redemption transaction.
+/// Unified redeemer for the voucher validator. One validator, one
+/// address — the variant tag selects the operation.
 ///
-/// The reificator signs `own_ref.transaction_id || "REDEEM"` (38 bytes)
-/// under the datum's `reificator_pk`, proving they authorise the
-/// removal of this voucher entry.
-pub type RedeemRedeemer {
-  /// Ed25519 signature (64 bytes) over (txid || "REDEEM").
-  reificator_sig: ByteArray,
-}
-
-/// Redeemer for a spend transaction.
-///
-/// Per-transaction binding for acceptor_pk, TxOutRef, and d is provided by
-/// the customer's Ed25519 signature over `signed_data`, verified on-chain
-/// with the Plutus builtin VerifyEd25519Signature.
-///
-/// `signed_data` canonical byte layout (106 bytes, big-endian):
-///   txid        [32 bytes]   raw Cardano TxId of one consumed input
-///   ix          [ 2 bytes]   u16 output index
-///   acceptor_ax [32 bytes]   acceptor's EdDSA-Jubjub pk x coord
-///   acceptor_ay [32 bytes]   acceptor's EdDSA-Jubjub pk y coord
-///   d           [ 8 bytes]   spend amount
-pub type SpendRedeemer {
-  /// The public spend amount
-  d: Int,
-  /// New Poseidon commitment to updated counter
-  commit_spent_new: Int,
-  /// Issuer's EdDSA public key (x coordinate, Jubjub curve)
-  issuer_ax: Int,
-  /// Issuer's EdDSA public key (y coordinate, Jubjub curve)
-  issuer_ay: Int,
-  /// Customer's Ed25519 public key, high half (first 16 bytes as BE int).
-  /// Matches the corresponding Groth16 public input so the validator can
-  /// cross-check it against `customer_pubkey` below.
-  pk_c_hi: Int,
-  /// Customer's Ed25519 public key, low half (last 16 bytes as BE int).
-  pk_c_lo: Int,
-  /// Customer's Ed25519 public key, 32 bytes.
-  customer_pubkey: ByteArray,
-  /// Customer's Ed25519 signature over `signed_data`, 64 bytes.
-  customer_signature: ByteArray,
-  /// Canonical 106-byte payload the customer signed (see layout above).
-  signed_data: ByteArray,
-  /// Groth16 proof that the spend is valid
-  proof: Groth16Proof,
+/// Plutus Data encoding (inline fields, no nesting):
+///   Spend  → Constr 0 [d, commit_spent_new, …, proof]
+///   Redeem → Constr 1 [reificator_sig]
+///   Revert → Constr 2 [prior_commit_spent, shop_sig]
+pub type VoucherAction {
+  /// Settlement: Groth16 + Ed25519 two-layer authorisation.
+  ///
+  /// `signed_data` canonical byte layout (106 bytes, big-endian):
+  ///   txid        [32 bytes]   raw Cardano TxId of one consumed input
+  ///   ix          [ 2 bytes]   u16 output index
+  ///   acceptor_ax [32 bytes]   acceptor's EdDSA-Jubjub pk x coord
+  ///   acceptor_ay [32 bytes]   acceptor's EdDSA-Jubjub pk y coord
+  ///   d           [ 8 bytes]   spend amount
+  Spend {
+    /// The public spend amount
+    d: Int,
+    /// New Poseidon commitment to updated counter
+    commit_spent_new: Int,
+    /// Issuer's EdDSA public key (x coordinate, Jubjub curve)
+    issuer_ax: Int,
+    /// Issuer's EdDSA public key (y coordinate, Jubjub curve)
+    issuer_ay: Int,
+    /// Customer's Ed25519 public key, high half (first 16 bytes as BE int).
+    pk_c_hi: Int,
+    /// Customer's Ed25519 public key, low half (last 16 bytes as BE int).
+    pk_c_lo: Int,
+    /// Customer's Ed25519 public key, 32 bytes.
+    customer_pubkey: ByteArray,
+    /// Customer's Ed25519 signature over `signed_data`, 64 bytes.
+    customer_signature: ByteArray,
+    /// Canonical 106-byte payload the customer signed (see layout above).
+    signed_data: ByteArray,
+    /// Groth16 proof that the spend is valid
+    proof: Groth16Proof,
+  }
+  /// Redemption: reificator destroys the voucher entry.
+  ///
+  /// The reificator signs `own_ref.transaction_id || "REDEEM"` (38 bytes)
+  /// under the datum's `reificator_pk`.
+  Redeem {
+    /// Ed25519 signature (64 bytes) over (txid || "REDEEM").
+    reificator_sig: ByteArray,
+  }
+  /// Revert: shop master rolls back or removes an entry.
+  ///
+  /// The shop master signs `own_ref.transaction_id || "REVERT" ||
+  /// prior_commit_spent_bytes` (70 bytes) under the datum's `shop_pk`.
+  /// `prior_commit_spent_bytes` is 32 bytes big-endian zero-padded.
+  Revert {
+    /// Poseidon commitment to roll back to.
+    prior_commit_spent: Int,
+    /// Ed25519 signature (64 bytes) over (txid || "REVERT" || prior_bytes).
+    shop_sig: ByteArray,
+  }
 }

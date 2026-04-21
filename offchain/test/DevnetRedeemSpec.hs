@@ -120,11 +120,12 @@ loadCoalitionAddr = do
     let sbs = decodeHex raw
     pure (sbs, Script.coalitionAddr Testnet sbs)
 
-{- | Load the applied voucher-redeem script.
+{- | Load the unified voucher script (spend/redeem/revert share the same
+applied script and address).
 -}
-loadRedeemScript :: IO (AlonzoScript ConwayEra, Addr)
-loadRedeemScript = do
-    raw <- BS.readFile (fixturesDir <> "/applied-voucher-redeem.hex")
+loadVoucherScript :: IO (AlonzoScript ConwayEra, Addr)
+loadVoucherScript = do
+    raw <- BS.readFile (fixturesDir <> "/applied-voucher-spend.hex")
     let sbs = decodeHex raw
         script = Script.loadScript sbs
         addr = Script.scriptAddr Testnet script
@@ -138,7 +139,7 @@ decodeHex bs = case Base16.decode (BS8.filter isHexDigit bs) of
 spec :: Spec
 spec = describe "Devnet redemption flow (US2 — #9)" $ do
     (coalitionBytes, coalitionAddr) <- runIO loadCoalitionAddr
-    (redeemScript, _redeemAddr) <- runIO loadRedeemScript
+    (voucherScript, _voucherAddr) <- runIO loadVoucherScript
     bundle <- runIO loadBundle
 
     around withEnv $ do
@@ -180,7 +181,7 @@ spec = describe "Devnet redemption flow (US2 — #9)" $ do
             redeemResult <-
                 submitRedeem
                     env
-                    redeemScript
+                    voucherScript
                     coalEnv
                     voucherIn
                     voucherOut
@@ -226,7 +227,7 @@ spec = describe "Devnet redemption flow (US2 — #9)" $ do
             redeemResult <-
                 submitRedeem
                     env
-                    redeemScript
+                    voucherScript
                     coalEnv
                     voucherIn1
                     voucherOut1
@@ -294,7 +295,7 @@ spec = describe "Devnet redemption flow (US2 — #9)" $ do
             redeemResult <-
                 submitRedeem
                     env
-                    redeemScript
+                    voucherScript
                     bogusCoalEnv
                     voucherIn
                     voucherOut
@@ -344,7 +345,7 @@ submitRedeem ::
     TxIn ->
     TxOut ConwayEra ->
     IO SubmitResult
-submitRedeem env redeemScript' coalEnv voucherIn voucherOut = do
+submitRedeem env voucherScript' coalEnv voucherIn voucherOut = do
     -- Fund a fresh fee + collateral UTxO for the redeem tx.
     -- We can't reuse the settlement's reificator UTxOs — they're
     -- spent. Fund from genesis.
@@ -371,7 +372,7 @@ submitRedeem env redeemScript' coalEnv voucherIn voucherOut = do
                     colIn
                     (ceCoalitionTxIn coalEnv)
                     reificatorKeyHash
-                    redeemScript'
+                    voucherScript'
                     reificatorSig
             _ <- spend feeIn
             pure ()
