@@ -39,12 +39,15 @@ COALITION_HASH_CBOR="581c${COALITION_HASH}"
 echo "Coalition hash CBOR: $COALITION_HASH_CBOR"
 
 # Step 5: Apply first parameter (vk) to the blueprint
+# NOTE: must use -m/-v/-o format (not -v dotted.title) for in-place
+# modification — aiken v1.1.21 silently fails with the dotted title
+# form when the VK is large.
 echo "Applying VK parameter..."
-(cd "$ONCHAIN" && aiken blueprint apply -v voucher_spend.voucher_spend.spend "$VK_HEX")
+(cd "$ONCHAIN" && aiken blueprint apply -m voucher_spend -v voucher_spend "$VK_HEX" -o plutus.json)
 
 # Step 6: Apply second parameter (coalition_hash) to the partially-applied blueprint
 echo "Applying coalition_hash parameter..."
-(cd "$ONCHAIN" && aiken blueprint apply -v voucher_spend.voucher_spend.spend "$COALITION_HASH_CBOR")
+(cd "$ONCHAIN" && aiken blueprint apply -m voucher_spend -v voucher_spend "$COALITION_HASH_CBOR" -o plutus.json)
 
 # Step 7: Extract the applied compiled code and write to fixture
 APPLIED=$(jq -r '.validators[] | select(.title == "voucher_spend.voucher_spend.spend") | .compiledCode' "$ONCHAIN/plutus.json")
