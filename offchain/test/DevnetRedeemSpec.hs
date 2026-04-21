@@ -384,10 +384,11 @@ submitRedeem env redeemScript' coalEnv voucherIn voucherOut = do
                 (Map.map (either (Left . show) (Right . bumpExUnits)))
                 (evaluateTx (deProvider env) tx)
 
+        -- Coalition UTxO is a reference input only — must NOT be in
+        -- inputUtxos to avoid BabbageNonDisjointRefInputs.
         inputUtxos =
             [ (voucherIn, voucherOut)
             , (feeIn, feeOut)
-            , (ceCoalitionTxIn coalEnv, ceCoalitionTxOut coalEnv)
             ]
 
     result <-

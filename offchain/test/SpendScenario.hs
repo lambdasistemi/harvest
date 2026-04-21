@@ -230,14 +230,13 @@ submitSpend env bundle0 deployed coalEnv muts = do
                 (evaluateTx (deProvider env) tx)
 
         -- 'build' auto-adds all inputUtxos to the regular inputs of
-        -- the tx. Pass both the script UTxO (already spent via
-        -- spendScript inside spendVoucher; adding here is a no-op
-        -- because inputs is a Set) and the reificator fee UTxO
-        -- (needed so 'build' can subtract fees + leave change).
+        -- the tx. The coalition UTxO is a reference input only (added
+        -- via 'reference' in spendVoucher) — including it here would
+        -- violate BabbageNonDisjointRefInputs (inputs ∩ refInputs
+        -- must be empty).
         inputUtxos =
             [ (dsScriptTxIn deployed, dsScriptTxOut deployed)
             , (dsReificatorFeeTxIn deployed, dsReificatorFeeTxOut deployed)
-            , (ceCoalitionTxIn coalEnv, ceCoalitionTxOut coalEnv)
             ]
 
     result <-
