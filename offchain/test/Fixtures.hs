@@ -16,6 +16,7 @@ parallel copies.
 module Fixtures (
     SpendBundle (..),
     loadBundle,
+    loadBundleVariant,
     fixturesDir,
 ) where
 
@@ -97,14 +98,22 @@ instance Aeson.FromJSON CustomerFixture where
             <*> (read <$> o .: "pk_c_hi")
             <*> (read <$> o .: "pk_c_lo")
 
--- | Load the full bundle from 'fixturesDir'. Throws on malformed fixtures.
+-- | Load the default (c1) bundle from 'fixturesDir'.
 loadBundle :: IO SpendBundle
-loadBundle = do
-    proof <- readJson @SnarkjsProof "proof.json"
+loadBundle = loadBundleVariant Nothing
+
+{- | Load a fixture bundle from 'fixturesDir'. Pass 'Nothing' for the
+default (c1) variant, or @Just "c1-cert2"@ / @Just "c2"@ for an
+alternate fixture set. The VK and applied-script hex are shared across
+all variants; only @proof@, @customer@, and @public@ files differ.
+-}
+loadBundleVariant :: Maybe String -> IO SpendBundle
+loadBundleVariant variant = do
+    proof <- readJson @SnarkjsProof (suffixed "proof")
     vk <- readJson @SnarkjsVK "verification_key.json"
-    publicSignals <- readJson @[String] "public.json"
-    customer <- readJson @CustomerFixture "customer.json"
-    appliedHex <- readByteString "applied-script.hex"
+    publicSignals <- readJson @[String] (suffixed "public")
+    customer <- readJson @CustomerFixture (suffixed "customer")
+    appliedHex <- readByteString "applied-voucher-spend.hex"
 
     cp <- compressProof proof
     cvk <- compressVK vk
@@ -136,6 +145,11 @@ loadBundle = do
             , sbSkC = skC
             }
   where
+    suffixed :: String -> FilePath
+    suffixed base = case variant of
+        Nothing -> base <> ".json"
+        Just v -> base <> "-" <> v <> ".json"
+
     readJson :: (Aeson.FromJSON a) => FilePath -> IO a
     readJson name = do
         bytes <- LBS.readFile (fixturesDir <> "/" <> name)
