@@ -34,13 +34,11 @@ import Cardano.Crypto.DSIGN (
     rawSerialiseVerKeyDSIGN,
     signDSIGN,
  )
+import Cardano.Crypto.Hash.Class (hashToBytes)
 import Cardano.Ledger.Address (Addr)
 import Cardano.Ledger.Api.Scripts.Data (Datum (Datum))
 import Cardano.Ledger.Api.Tx.Out (TxOut, coinTxOutL, datumTxOutL)
-import Cardano.Ledger.Plutus.Data (
-    binaryDataToData,
-    getPlutusData,
- )
+import qualified Cardano.Ledger.BaseTypes as BaseTypes
 import Cardano.Ledger.Coin (Coin (..))
 import Cardano.Ledger.Conway (ConwayEra)
 import Cardano.Ledger.Conway.Scripts (AlonzoScript)
@@ -52,9 +50,12 @@ import Cardano.Ledger.Keys (
     hashKey,
  )
 import Cardano.Ledger.Mary.Value (MaryValue)
+import Cardano.Ledger.Plutus.Data (
+    binaryDataToData,
+    getPlutusData,
+ )
 import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
 import Cardano.Ledger.TxIn (TxId (..), TxIn (..))
-import qualified Cardano.Ledger.BaseTypes as BaseTypes
 import Cardano.Ledger.Val (inject)
 import Cardano.Node.Client.E2E.Setup (
     Ed25519DSIGN,
@@ -82,21 +83,20 @@ import Cardano.Node.Client.TxBuild (
     spend,
     spendScript,
  )
-import Cardano.Crypto.Hash.Class (hashToBytes)
 import qualified Codec.Serialise as CBOR
 import Control.Concurrent (threadDelay)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Short as SBS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Data.ByteString.Short as SBS
 import Lens.Micro ((^.))
 import qualified PlutusCore.Data as PLC
 
 import DevnetEnv (DevnetEnv (..))
-import qualified Harvest.Script as Script
 import Harvest.Actions (UserId)
+import qualified Harvest.Script as Script
 import Harvest.Types (CoalitionDatum (..), GovernanceRedeemer (..))
 import PlutusTx.IsData.Class (fromData)
 
@@ -136,9 +136,10 @@ Change flows back to 'genesisAddr'. Errors become test failures via
 -}
 bootstrapCoalition ::
     DevnetEnv ->
-    -- | Coalition-metadata script address (T012 supplies this from
-    -- @Harvest.Script.coalitionAddr@; for now callers pass it
-    -- explicitly).
+    {- | Coalition-metadata script address (T012 supplies this from
+    @Harvest.Script.coalitionAddr@; for now callers pass it
+    explicitly).
+    -}
     Addr ->
     IO HarvestFlow
 bootstrapCoalition env coalitionAddress = do
@@ -445,8 +446,7 @@ submitGovernance env coalitionBytes coalitionAddress flow op = do
             , hfReificatorFeeOut = reifFeeOut'
             }
 
-{- | Lookup the sorted-unique insertion of @x@ into @xs@ (byte order).
--}
+-- | Lookup the sorted-unique insertion of @x@ into @xs@ (byte order).
 insertSorted :: ByteString -> [ByteString] -> [ByteString]
 insertSorted x [] = [x]
 insertSorted x (y : ys)
@@ -463,8 +463,9 @@ governance tx for dropping entries).
 -}
 coalitionLists ::
     TxOut ConwayEra ->
-    -- | Expected @issuer_pk@, used purely as the default in the
-    -- fallback branch below (not checked against the datum here).
+    {- | Expected @issuer_pk@, used purely as the default in the
+    fallback branch below (not checked against the datum here).
+    -}
     ByteString ->
     ([ByteString], [ByteString])
 coalitionLists out _issuerPk =

@@ -99,8 +99,7 @@ import Test.Hspec (
     shouldSatisfy,
  )
 
-{- | Load coalition-metadata script and derive testnet address.
--}
+-- | Load coalition-metadata script and derive testnet address.
 loadCoalitionAddr :: IO (SBS.ShortByteString, Addr)
 loadCoalitionAddr = do
     raw <- BS.readFile (fixturesDir <> "/applied-coalition-metadata.hex")

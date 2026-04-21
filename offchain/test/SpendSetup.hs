@@ -32,6 +32,9 @@ module SpendSetup (
     deploySpendState,
 ) where
 
+import Cardano.Crypto.DSIGN (
+    rawSerialiseVerKeyDSIGN,
+ )
 import Cardano.Ledger.Address (Addr)
 import Cardano.Ledger.Api.Tx.Out (TxOut, coinTxOutL)
 import Cardano.Ledger.BaseTypes (Network (..))
@@ -46,9 +49,6 @@ import Cardano.Ledger.Keys (
 import Cardano.Ledger.Mary.Value (MaryValue)
 import Cardano.Ledger.TxIn (TxIn)
 import Cardano.Ledger.Val (inject)
-import Cardano.Crypto.DSIGN (
-    rawSerialiseVerKeyDSIGN,
- )
 import Cardano.Node.Client.E2E.Setup (
     Ed25519DSIGN,
     SignKeyDSIGN,

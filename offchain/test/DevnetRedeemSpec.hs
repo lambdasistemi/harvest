@@ -90,8 +90,8 @@ import Harvest.Transaction (redeemVoucher)
 import HarvestFlow (
     GovOp (..),
     HarvestFlow (..),
-    bumpExUnits,
     bootstrapCoalition,
+    bumpExUnits,
     submitGovernance,
  )
 import Lens.Micro ((^.))
@@ -112,8 +112,7 @@ import Test.Hspec (
 data NoQ a
     deriving ()
 
-{- | Load the applied coalition-metadata script.
--}
+-- | Load the applied coalition-metadata script.
 loadCoalitionAddr :: IO (SBS.ShortByteString, Addr)
 loadCoalitionAddr = do
     raw <- BS.readFile (fixturesDir <> "/applied-coalition-metadata.hex")
@@ -520,7 +519,7 @@ waitForFunded provider addr feePay collateralPay attempts
         let fees = filter (\(_, o) -> o ^. coinTxOutL == feePay) utxos
             cols = filter (\(_, o) -> o ^. coinTxOutL == collateralPay) utxos
         case (fees, cols) of
-            ((f : _), (c : _)) -> pure (fst f, snd f, fst c, snd c)
+            (f : _, c : _) -> pure (fst f, snd f, fst c, snd c)
             _ -> do
                 threadDelay 1_000_000
                 waitForFunded provider addr feePay collateralPay (attempts - 1)

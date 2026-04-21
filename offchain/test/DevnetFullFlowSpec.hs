@@ -31,14 +31,13 @@ import Cardano.Crypto.DSIGN (
  )
 import Cardano.Ledger.Address (Addr)
 import Cardano.Ledger.Api.Scripts.Data (Datum (Datum))
-import Cardano.Ledger.Api.Tx.Out (datumTxOutL)
+import Cardano.Ledger.Api.Tx.Out (TxOut, datumTxOutL)
 import Cardano.Ledger.BaseTypes (Network (..))
+import Cardano.Ledger.Conway (ConwayEra)
 import Cardano.Ledger.Plutus.Data (
     binaryDataToData,
     getPlutusData,
  )
-import Cardano.Ledger.Api.Tx.Out (TxOut)
-import Cardano.Ledger.Conway (ConwayEra)
 import Cardano.Ledger.TxIn (TxIn)
 import Cardano.Node.Client.Provider (Provider (..))
 import Cardano.Node.Client.Submitter (SubmitResult (..))
@@ -138,7 +137,7 @@ spec = describe "Devnet full protocol flow (US1 — #9)" $ do
         -- shop's public key, then 'AddReificator' for the reificator's
         -- public key.  Each tx consumes the current coalition UTxO,
         -- carries an issuer Ed25519 signature over @serialise(own_ref)
-        -- || op_tag || target_pk@, and re-pays the coalition address
+        -- \|| op_tag || target_pk@, and re-pays the coalition address
         -- with the extended datum.  The reificator funds fees and
         -- collateral from its bootstrap-seeded UTxOs.
         --
@@ -375,8 +374,7 @@ assertVoucherCommit out expectedCommit =
         _ ->
             error "voucher output has no inline datum"
 
-{- | True iff the node rejected the tx.
--}
+-- | True iff the node rejected the tx.
 isRejected :: SubmitResult -> Bool
 isRejected (Rejected _) = True
 isRejected _ = False

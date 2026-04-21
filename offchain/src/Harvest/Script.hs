@@ -1,8 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Load the voucher and coalition-metadata validators from
--- Aiken blueprint output.
+{- | Load the voucher and coalition-metadata validators from
+Aiken blueprint output.
+-}
 module Harvest.Script (
     loadScript,
     scriptAddr,
@@ -68,4 +69,3 @@ Convenience wrapper: @'scriptAddr' n . 'coalitionScript'@.
 -}
 coalitionAddr :: Network -> SBS.ShortByteString -> Addr
 coalitionAddr network = scriptAddr network . coalitionScript
-

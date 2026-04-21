@@ -41,8 +41,8 @@ module Harvest.Actions (
     revert,
 ) where
 
-import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -56,8 +56,9 @@ newtype PubKey = PubKey {unPubKey :: ByteString}
 newtype UserId = UserId {unUserId :: Integer}
     deriving newtype (Eq, Ord, Show)
 
--- | Opaque Poseidon commitment. Internal structure is not needed at
--- this abstraction level.
+{- | Opaque Poseidon commitment. Internal structure is not needed at
+this abstraction level.
+-}
 newtype Commit = Commit {unCommit :: Integer}
     deriving newtype (Eq, Ord, Show)
 
@@ -65,10 +66,11 @@ newtype Commit = Commit {unCommit :: Integer}
 newtype Sig = Sig {unSig :: ByteString}
     deriving newtype (Eq, Ord, Show)
 
--- | Opaque bundle of customer-side proof material (Groth16 proof +
--- Ed25519 signature over @signed_data@). The pure model treats it as
--- a black box; its validity is an abstract predicate resolved by the
--- real validator.
+{- | Opaque bundle of customer-side proof material (Groth16 proof +
+Ed25519 signature over @signed_data@). The pure model treats it as
+a black box; its validity is an abstract predicate resolved by the
+real validator.
+-}
 newtype ProofEvidence = ProofEvidence {unProofEvidence :: ByteString}
     deriving newtype (Eq, Ord, Show)
 
@@ -89,8 +91,9 @@ data HarvestState = HarvestState
     }
     deriving stock (Eq, Show)
 
--- | Transition rejection reasons — one constructor per validator
--- failure mode.
+{- | Transition rejection reasons — one constructor per validator
+failure mode.
+-}
 data Reject
     = ShopAlreadyRegistered
     | ShopNotRegistered
@@ -110,6 +113,7 @@ data Reject
 type Step = Either Reject HarvestState
 
 -- * Signature-validity stub
+
 --
 -- The pure twin has no crypto; the on-chain validator is the real
 -- gatekeeper. For signature-parity parity only (research D9) the
@@ -144,7 +148,7 @@ addShop :: PubKey -> Sig -> HarvestState -> Step
 addShop shop sig st
     | not (sigValid sig) = Left IssuerSigInvalid
     | shop `Set.member` hsShops st = Left ShopAlreadyRegistered
-    | otherwise = Right st {hsShops = Set.insert shop (hsShops st)}
+    | otherwise = Right st{hsShops = Set.insert shop (hsShops st)}
 
 {- | Governance: add a reificator to the coalition.
 
@@ -155,7 +159,7 @@ addReificator reif sig st
     | not (sigValid sig) = Left IssuerSigInvalid
     | reif `Set.member` hsReificators st = Left ReificatorAlreadyRegistered
     | otherwise =
-        Right st {hsReificators = Set.insert reif (hsReificators st)}
+        Right st{hsReificators = Set.insert reif (hsReificators st)}
 
 {- | Governance: remove a reificator from the coalition.
 
@@ -168,7 +172,7 @@ revokeReificator reif sig st
     | not (sigValid sig) = Left IssuerSigInvalid
     | reif `Set.notMember` hsReificators st = Left ReificatorNotRegistered
     | otherwise =
-        Right st {hsReificators = Set.delete reif (hsReificators st)}
+        Right st{hsReificators = Set.delete reif (hsReificators st)}
 
 {- | Stub proof-validity predicate mirroring 'sigValid': a
 'ProofEvidence' is treated as valid iff its bytestring is non-empty.
@@ -247,7 +251,7 @@ redeem user reif sig st =
             | not (sigValid sig) ->
                 Left CustomerSigInvalid
             | otherwise ->
-                Right st {hsEntries = Map.delete user (hsEntries st)}
+                Right st{hsEntries = Map.delete user (hsEntries st)}
 
 {- | Revert: roll the customer's entry back to a prior commitment.
 
@@ -269,7 +273,7 @@ revert user prior sig st =
         Just entry
             | not (sigValid sig) -> Left CustomerSigInvalid
             | otherwise ->
-                let entry' = entry {veCommitSpent = prior}
+                let entry' = entry{veCommitSpent = prior}
                  in Right
                         st
                             { hsEntries =
