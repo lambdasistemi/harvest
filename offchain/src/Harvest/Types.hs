@@ -2,6 +2,7 @@
 module Harvest.Types (
     VoucherDatum (..),
     SpendRedeemer (..),
+    RedeemRedeemer (..),
     Groth16Proof (..),
     CoalitionDatum (..),
     GovernanceRedeemer (..),
@@ -91,6 +92,28 @@ instance FromData GovernanceRedeemer where
         PLC.Constr 0 [PLC.B tgt, PLC.B sig] -> Just (AddShop tgt sig)
         PLC.Constr 1 [PLC.B tgt, PLC.B sig] -> Just (AddReificator tgt sig)
         PLC.Constr 2 [PLC.B tgt, PLC.B sig] -> Just (RevokeReificator tgt sig)
+        _ -> Nothing
+
+{- | Redeemer for a redemption transaction.
+
+Aiken: @Constr 0 [Bytes reificator_sig]@
+
+The reificator signs @own_ref.transaction_id || "REDEEM"@ (38 bytes)
+under the datum's @reificator_pk@.
+-}
+newtype RedeemRedeemer = RedeemRedeemer
+    { rrReificatorSig :: ByteString
+    -- ^ Ed25519 signature (64 bytes)
+    }
+
+instance ToData RedeemRedeemer where
+    toBuiltinData (RedeemRedeemer sig) =
+        BuiltinData $
+            PLC.Constr 0 [PLC.B sig]
+
+instance FromData RedeemRedeemer where
+    fromBuiltinData (BuiltinData d) = case d of
+        PLC.Constr 0 [PLC.B sig] -> Just (RedeemRedeemer sig)
         _ -> Nothing
 
 {- | Groth16 proof: three compressed BLS12-381 curve points.

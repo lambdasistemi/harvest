@@ -39,6 +39,16 @@ pub type VoucherDatum {
   reificator_pk: ByteArray,
 }
 
+/// Redeemer for a redemption transaction.
+///
+/// The reificator signs `own_ref.transaction_id || "REDEEM"` (38 bytes)
+/// under the datum's `reificator_pk`, proving they authorise the
+/// removal of this voucher entry.
+pub type RedeemRedeemer {
+  /// Ed25519 signature (64 bytes) over (txid || "REDEEM").
+  reificator_sig: ByteArray,
+}
+
 /// Redeemer for a spend transaction.
 ///
 /// Per-transaction binding for acceptor_pk, TxOutRef, and d is provided by

@@ -49,7 +49,7 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Short as SBS
 import Data.Char (isHexDigit)
 import DevnetEnv (DevnetEnv (..), withEnv)
-import Fixtures (SpendBundle (..), loadBundle, loadBundleVariant)
+import Fixtures (SpendBundle (..), fixturesDir, loadBundle, loadBundleVariant)
 import qualified Harvest.Script as Script
 import Harvest.Types (CoalitionDatum (..), VoucherDatum (..))
 import HarvestFlow (
@@ -79,7 +79,7 @@ alongside the voucher-spend applied script.
 -}
 loadCoalitionAddr :: IO (SBS.ShortByteString, Addr)
 loadCoalitionAddr = do
-    raw <- BS.readFile "test/fixtures/applied-coalition-metadata.hex"
+    raw <- BS.readFile (fixturesDir <> "/applied-coalition-metadata.hex")
     let sbs = decodeHex raw
     pure (sbs, Script.coalitionAddr Testnet sbs)
   where

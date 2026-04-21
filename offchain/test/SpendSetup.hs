@@ -129,7 +129,11 @@ message bubbles up as a test failure.
 -}
 deploySpendState :: DevnetEnv -> SpendBundle -> IO DeployedSpend
 deploySpendState env bundle = do
-    seed <- case deGenesisUtxos env of
+    -- Query fresh genesis UTxOs rather than using the snapshot
+    -- ('deGenesisUtxos'), because prior txs in the same test
+    -- (e.g. 'bootstrapCoalition') may have consumed snapshot entries.
+    freshUtxos <- queryUTxOs (deProvider env) genesisAddr
+    seed <- case freshUtxos of
         u : _ -> pure u
         [] -> error "deploySpendState: genesis has no UTxOs"
     let (seedIn, _seedOut) = seed
@@ -216,7 +220,14 @@ deploySpendState env bundle = do
                         )
                 Submitted _txId -> pure ()
 
-    reifUtxos <- waitForUtxos (deProvider env) (deReificatorAddr env) 30
+    -- Wait for NEW UTxOs at the reificator address (exclude any
+    -- pre-existing ones from prior txs like 'bootstrapCoalition').
+    reifUtxos <-
+        waitForFreshUtxosByValue
+            (deProvider env)
+            (deReificatorAddr env)
+            reificatorFeePay
+            30
     scriptUtxos <- waitForUtxos (deProvider env) scriptAddress 30
 
     (reifFeeIn, reifFeeOut) <- pickOne "reificator fee" reificatorFeePay reifUtxos
@@ -284,4 +295,34 @@ waitForUtxos provider addr attempts
             then do
                 threadDelay 1_000_000
                 waitForUtxos provider addr (attempts - 1)
+            else pure utxos
+
+{- | Poll until the address holds a UTxO with the exact expected value.
+
+Unlike 'waitForUtxos', this is robust when the address already has
+UTxOs from prior txs (e.g. leftover governance change). It waits
+until the deploy tx's outputs appear, identifiable by their exact
+coin value.
+-}
+waitForFreshUtxosByValue ::
+    Provider IO ->
+    Addr ->
+    Coin ->
+    Int ->
+    IO [(TxIn, TxOut ConwayEra)]
+waitForFreshUtxosByValue provider addr expected attempts
+    | attempts <= 0 =
+        error
+            ( "waitForFreshUtxosByValue: timed out waiting for "
+                <> show expected
+                <> " at "
+                <> show addr
+            )
+    | otherwise = do
+        utxos <- queryUTxOs provider addr
+        let matching = filter (\(_, o) -> o ^. coinTxOutL == expected) utxos
+        if null matching
+            then do
+                threadDelay 1_000_000
+                waitForFreshUtxosByValue provider addr expected (attempts - 1)
             else pure utxos

@@ -25,6 +25,7 @@ module HarvestFlow (
     bootstrapCoalition,
     GovOp (..),
     submitGovernance,
+    bumpExUnits,
 ) where
 
 import Cardano.Crypto.DSIGN (
