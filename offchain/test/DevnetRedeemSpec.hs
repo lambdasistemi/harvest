@@ -459,22 +459,13 @@ fundReificator env = do
                         ("fundReificator: rejected: " <> show reason)
                 Submitted _txId -> pure ()
 
-    reifUtxos <- waitForUtxos (deProvider env) (deReificatorAddr env) 30
-    (fIn, fOut) <- pickByValue "fee" feePay reifUtxos
-    (cIn, cOut) <- pickByValue "collateral" collateralPay reifUtxos
+    -- Poll until UTxOs with the exact funded amounts appear.
+    -- The reificator address may already have change UTxOs from the
+    -- spend phase, so 'waitForUtxos' would return immediately with
+    -- stale UTxOs before the funding tx is confirmed.
+    (fIn, fOut, cIn, cOut) <-
+        waitForFunded (deProvider env) (deReificatorAddr env) feePay collateralPay 30
     pure (fIn, fOut, cIn, cOut)
-  where
-    pickByValue ::
-        String ->
-        Coin ->
-        [(TxIn, TxOut ConwayEra)] ->
-        IO (TxIn, TxOut ConwayEra)
-    pickByValue label expected us =
-        case filter (\(_, o) -> o ^. coinTxOutL == expected) us of
-            (u : _) -> pure u
-            [] ->
-                error
-                    ("fundReificator: no " <> label <> " UTxO with " <> show expected)
 
 waitForNewUtxo ::
     Provider IO ->
@@ -509,6 +500,29 @@ waitForUtxos provider addr attempts
                 threadDelay 1_000_000
                 waitForUtxos provider addr (attempts - 1)
             else pure utxos
+
+{- | Poll until UTxOs with the exact fee and collateral amounts appear
+at the given address. Returns (feeIn, feeOut, collateralIn, collateralOut).
+-}
+waitForFunded ::
+    Provider IO ->
+    Addr ->
+    Coin ->
+    Coin ->
+    Int ->
+    IO (TxIn, TxOut ConwayEra, TxIn, TxOut ConwayEra)
+waitForFunded provider addr feePay collateralPay attempts
+    | attempts <= 0 =
+        error "waitForFunded: timed out waiting for funded UTxOs"
+    | otherwise = do
+        utxos <- queryUTxOs provider addr
+        let fees = filter (\(_, o) -> o ^. coinTxOutL == feePay) utxos
+            cols = filter (\(_, o) -> o ^. coinTxOutL == collateralPay) utxos
+        case (fees, cols) of
+            ((f : _), (c : _)) -> pure (fst f, snd f, fst c, snd c)
+            _ -> do
+                threadDelay 1_000_000
+                waitForFunded provider addr feePay collateralPay (attempts - 1)
 
 isRejected :: SubmitResult -> Bool
 isRejected (Rejected _) = True
