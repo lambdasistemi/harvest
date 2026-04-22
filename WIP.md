@@ -1,53 +1,52 @@
-# WIP: Issue #23 — Card-based identity model
+# WIP: Issue #23 — Card-based identity model + certificate anchoring
 
 ## Status
-Paused — blocked on Poseidon Merkle tree infrastructure.
+Design phase — Hydra-based architecture captured in constitution v6.0.0.
+Blocked on Hydra research (see open questions below).
 
 ## What's done
-- Constitution updated to v5.0.0 with card-based identity model
-- All protocol docs updated (actors, lifecycle, security, semantics)
+- Constitution v6.0.0 with two-layer Hydra+L1 architecture
+- All protocol docs updated for card model (actors, lifecycle, security, semantics)
 - All architecture docs updated (cryptography — signed_data 74 bytes)
 - All spec contracts updated (coalition-metadata-datum, voucher-datum, actions, signed-data-layout)
-- Commit: b3a4c36
+- Poseidon Merkle tree ruled out (on-chain Poseidon blows Plutus budget)
+- SHA-256 MPF on Hydra + L1 reference input identified as viable alternative
 
-## Key design decisions (card model)
-- Reificator is dumb commodity hardware — no keys, no secrets
-- Both keys (Jubjub + Ed25519) loaded into reificator volatile RAM via NFC daily
-- Jubjub key is per-shop (shared across all reificators of that shop)
-- Ed25519 key is per-reificator (unique, for tx signing)
-- Power-off = both keys vanish from RAM
-- Security officer loads keys each morning, physical kill switch at close
+## Key architecture (v6.0.0)
 
-## Unsolved: revocation catastrophe
-Off-chain certificates (cap signed by Jubjub key) cannot be safely revoked:
-- Leaked Jubjub key = unlimited certificate forgery
-- In a coalition, forged certificates are a money printer against ALL other shops
-- Revoking the key destroys all legitimate unspent balances (can't distinguish real from forged)
-- This is an existential threat to the coalition model
+### Two layers, separated concerns
+- **L1**: settlement, redemption, revert, shop/card registration, certificate root (reference input)
+- **L2 (Hydra)**: topup transactions only, certificate MPF (SHA-256), near-zero fees
 
-### Required solution: on-chain certificate anchoring
-- Batch Merkle root of certificates published on-chain (hourly/daily)
-- After revocation, only anchored certificates are valid
-- Requires Poseidon Merkle tree (not SHA-256) because membership must be verified inside ZK circuit
-- Poseidon in-circuit: ~250 constraints/hash vs SHA-256: ~25,000
-- Tree data published to IPFS (content-addressed), CID on-chain alongside root
-- Data providers fetch from IPFS, serve Merkle paths, verify against on-chain root
+### Certificate anchoring (solves revocation catastrophe)
+- Every topup = one Hydra transaction anchoring certificate_id in MPF
+- certificate_id = Poseidon(user_id, cap) — exposed as circuit public input
+- L1 validator checks SHA-256 MPF proof against certificate root (reference input)
+- No Poseidon on-chain needed — Poseidon stays in-circuit, SHA-256 stays on-chain
 
-### Missing infrastructure (blocks everything)
-1. Poseidon hash in Aiken — does not exist
-2. Poseidon Merkle tree in Aiken — does not exist
-3. Poseidon Merkle tree in Haskell — does not exist
-4. On-chain cost profiling — unknown, might kill the approach
-5. IPFS/content-addressed publication layer for tree data
-6. Contention management for anchor tree updates
-7. Circuit extension for Merkle membership proof
+### Key ceremony (shop-coalition separation)
+- Shop generates its own Jubjub key pair, registers public key on L1
+- Coalition manufactures cards with Ed25519 only
+- Shop loads Jubjub private key onto cards (same key, all shop's cards)
+- Coalition never sees Jubjub private key — cannot forge certificates
 
-## What's NOT done (blocked)
-- On-chain validator changes (coalition datum restructure, acceptor binding)
-- Off-chain code changes (Types.hs, HarvestFlow.hs)
-- Circuit naming updates
-- Devnet test updates
-- Lean model updates
+### Daily fan-out audit
+- Hydra head processes topups all day
+- End of day: changeset published to IPFS, shops audit and counter-sign
+- Fan-out to L1 produces certificate root UTxO (reference input)
+- Any shop can validate everything (all Jubjub public keys known from L1)
 
-## Next project
-Poseidon Merkle tree on Cardano — separate project, prerequisite for certificate anchoring.
+## Open research (blocks implementation)
+1. Hydra snapshot finality — are signed snapshots irrevocable?
+2. Hydra fan-out mechanics — how to produce certificate root UTxO on L1?
+3. Can shops counter-sign as part of the fan-out protocol?
+4. Hydra participant model — coalition alone, or shops participate?
+5. IPFS changeset format and efficient validation
+
+## What's NOT done
+- Protocol docs update for Hydra layer (actors, lifecycle, security, semantics)
+- Spec contracts update for certificate_id public input and certificate root
+- On-chain validator changes
+- Off-chain code changes
+- Circuit changes (add certificate_id public input)
+- Hydra integration (entirely new)
