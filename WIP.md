@@ -1,67 +1,53 @@
-# WIP: Issue #10 — customer Ed25519 signature binds acceptor_pk + TxOutRef
+# WIP: Issue #23 — Card-based identity model
 
 ## Status
-Design agreed. Supersedes earlier nonce-Poseidon approach.
-Issue #12 (Poseidon research) closed. Issue #13 filed for v2 privacy redesign (nullifier-based).
+Paused — blocked on Poseidon Merkle tree infrastructure.
 
-## Design summary
+## What's done
+- Constitution updated to v5.0.0 with card-based identity model
+- All protocol docs updated (actors, lifecycle, security, semantics)
+- All architecture docs updated (cryptography — signed_data 74 bytes)
+- All spec contracts updated (coalition-metadata-datum, voucher-datum, actions, signed-data-layout)
+- Commit: b3a4c36
 
-Circuit public inputs (post-PR):
-  [d, commit_S_old, commit_S_new, user_id, issuer_Ax, issuer_Ay, pk_c_hi, pk_c_lo]
-  — 8 inputs, IC = 9. acceptor_Ax/Ay removed (revert of #4 circuit addition).
-  pk_c (customer Ed25519 pk, 32 bytes) split across two field elements.
+## Key design decisions (card model)
+- Reificator is dumb commodity hardware — no keys, no secrets
+- Both keys (Jubjub + Ed25519) loaded into reificator volatile RAM via NFC daily
+- Jubjub key is per-shop (shared across all reificators of that shop)
+- Ed25519 key is per-reificator (unique, for tx signing)
+- Power-off = both keys vanish from RAM
+- Security officer loads keys each morning, physical kill switch at close
 
-Redeemer (Aiken):
-  SpendRedeemer {
-    d,
-    commit_spent_new,
-    issuer_ax, issuer_ay,
-    pk_c_hi, pk_c_lo,           // match the proof's public inputs
-    customer_pubkey: ByteArray, // 32 bytes Ed25519 compressed pk
-    customer_signature: ByteArray,  // 64 bytes Ed25519 signature
-    signed_data: ByteArray,     // canonical byte layout below
-    proof: Groth16Proof,
-  }
+## Unsolved: revocation catastrophe
+Off-chain certificates (cap signed by Jubjub key) cannot be safely revoked:
+- Leaked Jubjub key = unlimited certificate forgery
+- In a coalition, forged certificates are a money printer against ALL other shops
+- Revoking the key destroys all legitimate unspent balances (can't distinguish real from forged)
+- This is an existential threat to the coalition model
 
-signed_data canonical byte layout (106 bytes total):
-  txid        [32 bytes]   raw Cardano TxId
-  ix          [ 2 bytes]   big-endian u16
-  acceptor_ax [32 bytes]   big-endian 256-bit integer
-  acceptor_ay [32 bytes]   big-endian 256-bit integer
-  d           [ 8 bytes]   big-endian u64
+### Required solution: on-chain certificate anchoring
+- Batch Merkle root of certificates published on-chain (hourly/daily)
+- After revocation, only anchored certificates are valid
+- Requires Poseidon Merkle tree (not SHA-256) because membership must be verified inside ZK circuit
+- Poseidon in-circuit: ~250 constraints/hash vs SHA-256: ~25,000
+- Tree data published to IPFS (content-addressed), CID on-chain alongside root
+- Data providers fetch from IPFS, serve Merkle paths, verify against on-chain root
 
-Validator checks:
-  1. VerifyEd25519Signature customer_pubkey signed_data customer_signature
-  2. Parse signed_data -> (txid, ix, acceptor_ax, acceptor_ay, d).
-  3. signed_data.d == redeemer.d (defence-in-depth).
-  4. customer_pubkey matches (pk_c_hi || pk_c_lo) — bytes split 16+16 correspond to integers.
-  5. TxOutRef(txid, ix) is in tx.inputs (list scan).
-  6. Groth16.verify with public inputs incl. pk_c_hi, pk_c_lo.
+### Missing infrastructure (blocks everything)
+1. Poseidon hash in Aiken — does not exist
+2. Poseidon Merkle tree in Aiken — does not exist
+3. Poseidon Merkle tree in Haskell — does not exist
+4. On-chain cost profiling — unknown, might kill the approach
+5. IPFS/content-addressed publication layer for tree data
+6. Contention management for anchor tree updates
+7. Circuit extension for Merkle membership proof
 
-Reificator trie check (reificator ∈ acceptor_pk) stays deferred to milestone 2.
+## What's NOT done (blocked)
+- On-chain validator changes (coalition datum restructure, acceptor binding)
+- Off-chain code changes (Types.hs, HarvestFlow.hs)
+- Circuit naming updates
+- Devnet test updates
+- Lean model updates
 
-## Plan
-1. [x] Rescope #10; close #12; file #13
-2. [ ] Docs: update cryptography.md, security.md, lifecycle.md, actors.md, constitution.md for customer-sig flow
-3. [ ] Circuit: remove acceptor_Ax/Ay, add pk_c_hi/pk_c_lo as public inputs
-4. [ ] JS: update generate_proof.js and generate_fixtures.js (generate Ed25519 keypair, split pk into hi/lo, build signed_data, sign it)
-5. [ ] Recompile circuit + trusted setup + generate proof
-6. [ ] Aiken types: SpendRedeemer with new fields; bump IC count comment
-7. [ ] Aiken validator: Ed25519 verify + signed_data parse + checks
-8. [ ] Haskell Types: SpendRedeemer shape with customer sig fields
-9. [ ] Haskell Transaction: thread new args through spendVoucher
-10. [ ] Haskell Serialize: spendRedeemer{ToData,ToCBOR} new signature
-11. [ ] Regenerate VK and applied script (for fixtures)
-12. [ ] Tests: Groth16Spec, E2ESpec updates (including Ed25519 signing in test fixtures)
-13. [ ] Run all 7 CI checks locally
-14. [ ] Clean commits (stgit if needed), push, open PR
-
-## Notes
-- Off-chain: customer's phone now holds sk_c (Ed25519) in addition to user_secret.
-  Public key pk_c split hi/lo across two BLS12-381 field elements.
-  Split convention (to pin down during implementation): first 16 bytes -> pk_c_hi as big-endian integer, last 16 bytes -> pk_c_lo.
-- Plutus builtin VerifyEd25519Signature operates on raw bytes — signed_data must be
-  in the exact canonical layout above (the customer's JS signing code must emit the
-  same bytes the validator parses).
-- Circuit binds pk_c as pass-through (no constraint); the validator uses pk_c for
-  Ed25519 verification and also cross-checks it against customer_pubkey in redeemer.
+## Next project
+Poseidon Merkle tree on Cardano — separate project, prerequisite for certificate anchoring.
