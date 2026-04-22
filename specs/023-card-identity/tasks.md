@@ -12,106 +12,83 @@
 - [ ] **1.3** Update all existing test fixtures for 9 public inputs
 - [ ] **1.4** Run circuit tests — verify existing proofs still validate with the additional output
 
-## Phase 2: On-chain — Certificate-store validator
+## Phase 2: On-chain — Settlement validator update
 
-- [ ] **2.1** Create `certificate_store.ak` validator
-  - Datum: `CertificateStoreDatum { mpf_root: ByteArray, epoch: Int }`
-  - Redeemer: `TopupRedeemer { issuer_jubjub_pk: ByteArray, user_id: Int, certificate_id: ByteArray, mpf_proof: MpfProof }`
-  - Checks: MPF insert proof valid, Ed25519 signer is registered card, issuer Jubjub key matches card's shop
-  - Reference input: coalition datum (committed into head)
-  - Output: same address, updated `mpf_root`
-- [ ] **2.2** Write unit tests for certificate-store validator
-  - Valid insert (registered card, correct proof)
-  - Reject: unregistered Ed25519 key
-  - Reject: issuer Jubjub key doesn't match card's shop
-  - Reject: invalid MPF proof
-  - Reject: output mpf_root doesn't match proof result
-- [ ] **2.3** Verify the validator compiles within Plutus budget for a single insert
-
-## Phase 3: On-chain — Settlement validator update
-
-- [ ] **3.1** Add `certificate_id` and `cert_mpf_proof` fields to settlement redeemer
+- [ ] **2.1** Add `certificate_id` and `cert_mpf_proof` fields to settlement redeemer
   - Per spec: `certificateId :: Integer, certMpfProof :: MpfProof`
-- [ ] **3.2** Add certificate root reference input reading
+- [ ] **2.2** Add certificate root reference input reading
   - Read certificate root UTxO by script address or NFT marker
-- [ ] **3.3** Add MPF membership verification
+- [ ] **2.3** Add MPF membership verification
   - `MPF.member(certificate_id, certMpfProof, certRoot)` using SHA-256
-- [ ] **3.4** Cross-check `certificate_id` against circuit public input index 8
-- [ ] **3.5** Update settlement validator tests
+- [ ] **2.4** Cross-check `certificate_id` against circuit public input index 8
+- [ ] **2.5** Update settlement validator tests
   - Valid settlement with certificate proof
   - Reject: certificate_id not in MPF (unanchored certificate)
   - Reject: certificate_id mismatch with circuit public input
   - Reject: wrong certificate root (stale reference input)
 
-## Phase 4: On-chain — Certificate root promotion validator
+## Phase 3: On-chain — Certificate root update validator
 
-- [ ] **4.1** Create `certificate_promotion.ak` validator
-  - Input: provisional certificate-store UTxO (from fan-out, at certificate-store address)
-  - Output: certificate-root UTxO (at reference-input address)
-  - Check: MPF root preserved, signed by coalition
-- [ ] **4.2** Write unit tests
-  - Valid promotion (correct root, coalition signature)
-  - Reject: MPF root tampered
+- [ ] **3.1** Create `certificate_root.ak` validator
+  - Input: current certificate root UTxO
+  - Output: updated certificate root UTxO (new MPF root)
+  - Check: signed by coalition
+- [ ] **3.2** Write unit tests
+  - Valid update (coalition signature)
   - Reject: unauthorized signer
+  - Reject: output not at same address
 
-## Phase 5: Off-chain — Hydra WebSocket client
+## Phase 4: Off-chain — MPFS certificate batching
 
-- [ ] **5.1** Define Hydra API types in `Hydra/Types.hs`
-  - `SnapshotConfirmed { headId, snapshot, signatures }`
-  - `Snapshot { number, version, confirmed, utxo }`
-  - `TxInvalid { headId, utxo, transaction, validationError }`
-  - Head lifecycle events: `HeadIsOpen`, `HeadIsClosed`, `ReadyToFanout`
-  - `NewTx { transaction }` (client → server)
-- [ ] **5.2** Implement WebSocket client in `Hydra/Client.hs`
-  - Connect to `ws://host:port`
-  - Send `NewTx` messages
-  - Parse incoming events (JSON)
-  - Callback-based event handling
-  - Reconnection with exponential backoff
-- [ ] **5.3** Write tests against a mock WebSocket server
-  - Submit tx → receive SnapshotConfirmed
-  - Submit invalid tx → receive TxInvalid
-  - Reconnection after disconnect
-
-## Phase 6: Off-chain — Topup transaction builder
-
-- [ ] **6.1** Implement certificate MPF operations in `Certificate/Store.hs`
+- [ ] **4.1** Define topup intent type and validation logic
+  - `TopupIntent { issuerJubjubPk, userId, certificateId, cardEd25519Pk, cardEd25519Sig }`
+  - Validate: card registered, Jubjub key matches shop, Ed25519 sig valid, no duplicate
+- [ ] **4.2** Implement certificate MPF operations
   - `insertCertificate :: MpfRoot -> IssuerJubjubPk -> UserId -> CertificateId -> (MpfRoot, MpfProof)`
   - `memberCertificate :: MpfRoot -> CertificateId -> Maybe MpfProof`
   - SHA-256 MPF using existing MPF library
-- [ ] **6.2** Implement topup transaction builder in `Hydra/TopupTx.hs`
-  - Build Cardano tx consuming certificate-store UTxO
-  - Attach TopupRedeemer with MPF insert proof
-  - Attach coalition datum as reference input
-  - Card signs via Ed25519 (reificator delegates to card)
-- [ ] **6.3** Test: built transaction passes certificate-store validator (round-trip)
+- [ ] **4.3** Implement batch accumulation and signing
+  - Collect validated intents into batch
+  - Chain MPF inserts: root₀ → insert₁ → root₁ → ... → rootₙ
+  - Coalition signs `(batchNumber, previousRoot, newRoot, entries)`
+  - Return `BatchReceipt` to each reificator
+- [ ] **4.4** Implement MPFS topup intent endpoint
+  - Synchronous: accept intent, wait for batch commit, return receipt
+  - Handle: MPFS validates intent immediately, queues for next batch
+- [ ] **4.5** Write tests
+  - Valid intent → batch → receipt
+  - Reject: unregistered card
+  - Reject: Jubjub key mismatch
+  - Reject: invalid Ed25519 signature
+  - Reject: duplicate certificate_id
+  - Multiple intents → single batch → correct root transition
 
-## Phase 7: Off-chain — Reificator Hydra integration
+## Phase 5: Off-chain — Certificate root update + IPFS changeset
 
-- [ ] **7.1** Update reificator topup flow
-  - After card signs cap certificate (Jubjub): build topup tx, card signs (Ed25519), submit to Hydra via WebSocket
-  - Wait for `SnapshotConfirmed`
-  - Pass snapshot confirmation to user's phone alongside cap certificate
-- [ ] **7.2** Implement topup queue for Hydra disconnections
-  - Queue locally if Hydra node unreachable
-  - Retry on reconnect
-  - Cap certificate still given to user immediately (spendable after anchoring)
-- [ ] **7.3** Integration test: full topup cycle
-  - Casher sets reward → card signs certificate → Hydra anchoring → user gets certificate + confirmation
-
-## Phase 8: Off-chain — Certificate root promotion + IPFS changeset
-
-- [ ] **8.1** Implement promotion transaction builder in `Certificate/Promotion.hs`
-  - Build L1 tx: input from fan-out, output at certificate-root address
-  - Coalition signs (day-one)
-- [ ] **8.2** Implement IPFS changeset publisher
-  - Collect all topup entries from the epoch
-  - Format as JSON per spec (headId, epoch, previousRoot, newRoot, entries)
+- [ ] **5.1** Implement certificate root update tx builder
+  - Build L1 tx: consume current cert root UTxO, produce updated one
+  - Coalition signs
+- [ ] **5.2** Implement IPFS changeset publisher
+  - Collect entries from batch(es) since last publication
+  - Format as JSON per spec (batchNumber, previousRoot, newRoot, entries)
   - Publish to IPFS, return CID
-- [ ] **8.3** Implement changeset verification tool
+- [ ] **5.3** Implement changeset verification tool
   - Fetch changeset by CID
   - Verify all keys registered on L1
   - Replay inserts: previousRoot → newRoot
   - Per-shop entry cross-check
-- [ ] **8.4** Integration test: daily cycle
-  - Open head → topups → close → fan-out → publish changeset → verify → promote
+- [ ] **5.4** Integration test
+  - Batch intents → publish changeset → verify → update L1 root
+
+## Phase 6: Off-chain — Reificator topup integration
+
+- [ ] **6.1** Update reificator topup flow
+  - After card signs cap certificate (Jubjub): build topup intent, card signs (Ed25519), submit to MPFS
+  - Wait for batch receipt
+  - Pass receipt to user's phone alongside cap certificate
+- [ ] **6.2** Implement intent queue for MPFS disconnections
+  - Queue locally if MPFS unreachable
+  - Retry on reconnect
+  - Cap certificate still given to user immediately (spendable after anchoring)
+- [ ] **6.3** Integration test: full topup cycle
+  - Casher sets reward → card signs certificate → MPFS batching → user gets certificate + receipt

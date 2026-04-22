@@ -1,8 +1,8 @@
-# Spec: Hydra Certificate Anchoring
+# Spec: MPFS Certificate Anchoring
 
 **Issue**: #23 (card-based identity model + certificate anchoring)
-**Status**: Design — resolves open research questions from WIP.md
-**Constitution**: v6.0.0 §III-A
+**Status**: Design — replaces earlier Hydra-based design
+**Constitution**: v7.0.0 §III-A
 
 ## Problem
 
@@ -13,12 +13,13 @@ spendable across the entire coalition — a money printer for the
 attacker.
 
 Certificate anchoring solves this by requiring every topup to be
-recorded on-chain. A revoked key cannot anchor new certificates.
+recorded in a SHA-256 MPF. A revoked key cannot anchor new certificates.
 Existing certificates before revocation remain valid (they were
 legitimately signed); the damage window is bounded.
 
 One topup per L1 transaction is economically prohibitive.
-Hydra provides the same validator semantics at near-zero cost.
+MPFS batching provides near-zero marginal cost per topup by collecting
+intents off-chain and updating the certificate root on L1 periodically.
 
 ## Architecture
 
@@ -26,128 +27,113 @@ Hydra provides the same validator semantics at near-zero cost.
 
 | Layer | Transactions | State |
 |-------|-------------|-------|
-| **L1** | settlement, redemption, revert, shop/card registration, certificate root promotion | Spend trie, card trie, pending trie, certificate root (reference input) |
-| **L2 (Hydra)** | topup only | Certificate MPF (SHA-256) |
+| **L1** | settlement, redemption, revert, shop/card registration, certificate root update | Spend trie, card trie, pending trie, certificate root (reference input) |
+| **Off-chain (MPFS)** | topup intent batching | Certificate MPF (SHA-256) |
 
-### Hydra Head Configuration
+### MPFS Certificate Batching
 
-**Participants**: coalition only. Shops do NOT participate in the head.
+MPFS collects topup intents from reificators, validates them, and
+batches them into the certificate MPF. The same MPFS infrastructure
+that handles L1 settlement contention also handles certificate batching.
 
-**Rationale**: unanimous consensus requires all participants to sign
-every snapshot. Adding N shops means N+1 parties must be online and
-responsive. A single unresponsive shop blocks all topups coalition-wide.
-Coalition-only (1 party or a small coalition-operated committee) keeps
-the head operational. Shop audit happens *after* fan-out via IPFS
-changeset verification and L1 counter-signing.
-
-**Contestation period**: 12 hours minimum (Cardano mainnet safe zone =
-`3 * k / f` ≈ 36,000 slots ≈ 10 hours; round up to 12h for safety).
-
-**Hydra scripts**: published once on L1 via `--hydra-scripts-tx-id`.
-The head uses standard Hydra validators — no custom head logic.
-
-### Certificate MPF on the Hydra Head
-
-The Hydra head maintains one UTxO at a **certificate-store script
-address**. This UTxO's datum is the SHA-256 Merkle Patricia Forestry
-root of all anchored certificates.
-
+**Intent format**:
 ```
-CertificateStoreDatum
-  { mpfRoot :: ByteString    -- SHA-256 MPF root (32 bytes)
-  , epoch   :: Integer        -- daily epoch counter
-  }
-```
-
-The certificate-store validator allows spending only if:
-1. The transaction includes a valid MPF insert proof in the redeemer
-2. The inserted key is `(issuer_jubjub_pk, user_id)`
-3. The inserted value is `certificate_id` (raw bytes, 32)
-4. The Ed25519 key that signed the topup transaction is a registered
-   card (checked against a reference input from L1 — the coalition
-   datum snapshot committed into the head)
-5. Output at the same address carries the updated `mpfRoot`
-
-This validator runs **inside the Hydra head** — same Plutus semantics
-as L1, zero L1 fees.
-
-### Topup Transaction (L2)
-
-A topup is a single Hydra transaction:
-
-**Inputs:**
-- Certificate-store UTxO (consumed, updated)
-- Coalition datum UTxO (reference input — committed into head at init)
-
-**Redeemer:**
-```
-TopupRedeemer
+TopupIntent
   { issuerJubjubPk :: ByteString   -- 32 bytes
   , userId         :: Integer
   , certificateId  :: ByteString   -- Poseidon(user_id, cap), 32 bytes
-  , mpfProof       :: MpfProof     -- SHA-256 insert proof
+  , cardEd25519Pk  :: ByteString   -- 32 bytes
+  , cardEd25519Sig :: ByteString   -- Ed25519 signature over the above fields
   }
 ```
 
-**Outputs:**
-- Certificate-store UTxO with updated `mpfRoot`
+**MPFS validation** (off-chain, before batching):
+1. `cardEd25519Pk` is a registered card in the coalition datum (read from L1)
+2. `issuerJubjubPk` matches the Jubjub key registered for that card's shop
+3. `cardEd25519Sig` is a valid Ed25519 signature over the intent payload
+4. The intent is not a duplicate (same certificate_id not already in the MPF)
 
-**Signatures:**
-- Transaction signed by the card's Ed25519 key (reificator submits,
-  card signs via secure element)
+**Batch processing**:
+1. MPFS accumulates validated intents
+2. At batch commit (configurable interval — e.g. every few seconds or N intents):
+   - Chain MPF inserts: `root₀ → insert₁ → root₁ → ... → rootₙ`
+   - Coalition signs: `(batchNumber, previousRoot, newRoot, entries)`
+   - Return batch receipt to each reificator
+3. Periodically, MPFS submits a certificate root update tx to L1
 
-**What the validator does NOT check:**
+### Certificate Root on L1
+
+The certificate root is a reference-input UTxO:
+
+```
+CertificateRootDatum
+  { mpfRoot :: ByteString    -- SHA-256 MPF root (32 bytes)
+  }
+```
+
+Updated by the coalition via a simple L1 transaction:
+- Input: current certificate root UTxO
+- Output: new certificate root UTxO with updated `mpfRoot`
+- Signed by coalition
+
+The update frequency trades L1 fees against confirmation latency.
+Settlements reference whichever root is current. No gap in service.
+
+### Coalition Batch Receipt
+
+When a batch is committed, the coalition returns a signed receipt:
+
+```
+BatchReceipt
+  { batchNumber  :: Integer
+  , previousRoot :: ByteString   -- 32 bytes
+  , newRoot      :: ByteString   -- 32 bytes
+  , certificateId :: ByteString  -- this user's entry
+  , coalitionSig :: ByteString   -- Ed25519 signature over the above
+  }
+```
+
+This is the user's evidence that the coalition committed to including
+their topup. If the L1 root doesn't reflect a signed batch, the user
+has cryptographic proof of fraud. Enforcement is off-chain.
+
+### Topup Flow
+
+A topup is a reificator intent submitted to MPFS:
+
+**Steps:**
+1. Casher sets reward amount on the reificator
+2. Card signs cap certificate (Jubjub EdDSA) — given to user's phone
+3. Card signs topup intent (Ed25519) — submitted to MPFS
+4. MPFS validates intent, includes in current batch
+5. MPFS returns coalition batch receipt to reificator
+6. Reificator passes receipt to user's phone
+
+**What MPFS validates:**
+- Card Ed25519 key is registered in coalition datum
+- Issuer Jubjub key matches the card's shop
+- Ed25519 signature on the intent is valid
+
+**What MPFS does NOT validate:**
 - It does not verify that `certificateId == Poseidon(userId, cap)`.
-  Poseidon is not available on-chain. The binding is enforced later:
-  at spend time, the ZK circuit computes `certificate_id` from its
-  private inputs and exposes it as a public input. The L1 settlement
-  validator checks that this value has a valid MPF membership proof
-  against the certificate root.
+  Poseidon is not available off-chain in the MPFS stack. The binding
+  is enforced at spend time: the ZK circuit computes `certificate_id`
+  from its private inputs and exposes it as a public input. The L1
+  validator checks this value against the certificate root.
 - It does not verify the Jubjub signature on the cap certificate.
   That is the ZK circuit's job at spend time.
 
-**What the validator DOES check:**
-- MPF insert proof is valid (new root derives correctly)
-- The signing Ed25519 key is a registered card in the coalition datum
-- The `issuerJubjubPk` matches the Jubjub key registered for that
-  card's shop in the coalition datum
+This is sufficient: a registered card signed the intent, and the
+card's Jubjub key matches. If someone anchors a garbage
+`certificateId`, it will never pass the ZK proof at spend time.
 
-This is sufficient: a registered card signed the topup, and the card's
-Jubjub key matches. The actual cap validity is deferred to the ZK
-circuit. If someone anchors a garbage `certificateId`, it will never
-pass the ZK proof at spend time.
+### Changeset Publication
 
-### Daily Cycle
-
-#### 1. Head Opens (morning)
-
-The coalition opens a Hydra head with:
-- The certificate-store UTxO (committed from L1 or carried from
-  previous cycle)
-- A snapshot of the coalition datum (committed as reference input)
-
-If this is the first cycle, the certificate-store UTxO is created
-on L1 with an empty MPF root, then committed into the head.
-
-#### 2. Topups Throughout the Day
-
-Reificators connect to the Hydra node via the WebSocket API:
-- Submit topup transactions (same Cardano tx format)
-- Receive `SnapshotConfirmed` events as confirmation
-- Each confirmed snapshot is irrevocable (unanimous consensus)
-
-The reificator gives the customer a Hydra snapshot confirmation as
-proof of inclusion. The customer can verify the snapshot signature
-against the known participant keys.
-
-#### 3. Changeset Publication (end of day)
-
-Before closing the head, the coalition publishes to IPFS:
+After each batch (or group of batches), the coalition publishes to IPFS:
 
 ```json
 {
-  "headId": "<head currency symbol>",
-  "epoch": 42,
+  "batchNumber": 42,
   "previousRoot": "<hex 32 bytes>",
   "newRoot": "<hex 32 bytes>",
   "entries": [
@@ -155,8 +141,7 @@ Before closing the head, the coalition publishes to IPFS:
       "issuerJubjubPk": "<hex 32 bytes>",
       "userId": "<integer>",
       "certificateId": "<hex 32 bytes>",
-      "cardEd25519Pk": "<hex 32 bytes>",
-      "snapshotNumber": 17
+      "cardEd25519Pk": "<hex 32 bytes>"
     }
   ]
 }
@@ -168,7 +153,7 @@ Each entry is independently verifiable:
 - The full set of entries, applied in order to `previousRoot`, must
   produce `newRoot`
 
-#### 4. Shop Audit
+### Shop Audit
 
 Each shop:
 1. Fetches the IPFS changeset (CID is broadcast by coalition)
@@ -176,39 +161,10 @@ Each shop:
 3. Verifies the MPF root transition is correct
 4. Checks that entries attributed to their shop match their records
    (reificator logs)
-5. If anything is wrong: refuses to counter-sign
+5. If anything is wrong: raises a dispute
 
 A single honest shop catches any forgery. The coalition cannot
 fabricate entries because it lacks any shop's Jubjub private key.
-
-#### 5. Close and Fan-out
-
-The coalition closes the head. The latest confirmed snapshot is
-posted to L1. After the contestation period (12h), anyone can
-fan-out.
-
-Fan-out produces the certificate-store UTxO on L1.
-
-#### 6. Certificate Root Promotion (L1)
-
-A separate L1 transaction promotes the fan-out's certificate-store
-UTxO to the active certificate root:
-
-**Certificate Root Promotion Validator:**
-- Input: provisional certificate-store UTxO (from fan-out)
-- Output: certificate-root UTxO (at the reference-input address)
-- Required signatures: K-of-N shop signatures (configurable threshold)
-- Redeemer: IPFS CID of the changeset + shop signatures
-
-This two-step (fan-out → promotion) ensures shops explicitly approve
-the root before it becomes active for settlements. The previous
-certificate root remains active until promotion completes — no gap
-in service.
-
-**Alternative (simpler, day-one)**: coalition is the sole promoter
-(no shop counter-signing on-chain). Shops audit off-chain and raise
-disputes out-of-band. Counter-signing is added as a hardening step
-in a later issue.
 
 ### L1 Settlement Changes
 
@@ -247,35 +203,14 @@ internal.
 
 Total public inputs: 9 (was 8).
 
-### Reificator Hydra Connectivity
-
-The reificator connects to the Hydra node via WebSocket:
-
-```
-ws://<hydra-node>:4001
-```
-
-**Submit topup**: `{"tag": "NewTx", "transaction": {...}}`
-**Confirm**: listen for `SnapshotConfirmed` containing the tx
-
-The reificator builds the topup transaction using the same
-`cardano-cli transaction build-raw` format. The card signs via
-secure element. The reificator submits to the head.
-
-**Fallback**: if the Hydra node is unreachable, the topup is
-queued locally and retried. The customer receives the signed
-cap certificate immediately (signed by the card's Jubjub key)
-but cannot spend it until the topup is anchored and fanned out.
-
 ### Revocation Under Anchoring
 
 When a card's Jubjub key is compromised:
 
 1. Shop revokes the card on L1 (removes from coalition datum)
-2. The Hydra head's coalition-datum reference becomes stale —
-   the revoked card's Ed25519 key is no longer registered
-3. New topup transactions from the revoked card are rejected
-   by the certificate-store validator (card not registered)
+2. MPFS reads updated coalition datum — rejects intents from
+   the revoked card's Ed25519 key
+3. No service interruption for other cards
 4. Certificates anchored before revocation remain valid and
    spendable — they were legitimately signed
 5. The damage window = time between compromise and revocation
@@ -284,45 +219,29 @@ This is the fundamental improvement over unanchored certificates:
 revocation actually works. Without anchoring, a leaked key produces
 unlimited forged certificates forever.
 
-**Coalition datum refresh**: the head must see the updated coalition
-datum after a revocation. Options:
-- (a) Close and reopen the head with the new datum committed
-- (b) Use incremental commit to add the updated datum
-- (c) The head validator checks a secondary reference (L1 datum
-  via the chain component)
-
-Option (a) is simplest and acceptable for the rare revocation event.
-The head closes, fans out, the certificate root is promoted, and a
-new head opens with the updated coalition datum.
-
 ## Open Design Decisions
 
-1. **Shop counter-signing**: on-chain (K-of-N multisig on promotion)
-   vs off-chain (dispute-based). Day-one recommendation: off-chain
-   audit, on-chain counter-signing in a later issue.
+1. **Batch receipt format**: exact signed payload, encoding, and
+   verification method for the user's phone app.
 
-2. **Head lifecycle across days**: does the head close and reopen
-   daily, or stay open with incremental decommits? Daily close is
-   simpler and provides a natural audit boundary. Incremental
-   decommit would require the certificate-store UTxO to be
-   decommitted (materialized on L1) without closing the head.
+2. **Certificate root update frequency**: trades L1 fees against
+   confirmation latency. Options: hourly, daily, or on-demand
+   after N batches.
 
-3. **Multiple reificators**: the Hydra head is single-party
-   (coalition). Multiple reificators submit to the same head via
-   WebSocket. The head serializes transactions via the snapshot
-   leader. No contention — each topup consumes and reproduces the
-   same certificate-store UTxO, but the head handles this
-   sequentially within its UTxO set.
+3. **MPFS topup intent API**: REST or WebSocket? Same endpoint as
+   L1 settlement intents or separate? Synchronous (wait for batch
+   receipt) or async (poll/callback)?
 
-4. **Certificate-store UTxO contention inside the head**: with many
-   concurrent topups, all consuming the same UTxO, the head processes
-   them sequentially (one per snapshot). This is fine for the expected
-   volume (hundreds/day, not thousands/second). If throughput becomes
-   an issue, the MPF can be sharded across multiple UTxOs.
+4. **Data provider certificate tree serving**: same infrastructure
+   as spend trie proofs, but the certificate MPF data must be
+   published by the coalition for providers to serve.
 
 ## Non-Goals
 
 - Multi-certificate spend circuit (separate issue)
 - Native Rust prover (issue #2)
-- MPFS integration for L1 contention (issue #8)
+- MPFS integration for L1 contention (issue #8) — already exists
 - On-chain shop counter-signing of certificate root (future hardening)
+- Hydra-based topup (evaluated and rejected — adds operational
+  complexity without solving the trust problem better than signed
+  batch receipts)

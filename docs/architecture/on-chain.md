@@ -4,7 +4,7 @@
 
 All coalition state lives in a single UTXO containing a root hash. The full trie data lives off-chain, published by the coalition. Merkle proofs in transaction redeemers are verified against the on-chain root.
 
-A separate reference-input UTxO holds the certificate root — the SHA-256 MPF root of all anchored certificates, maintained via the Hydra daily cycle.
+A separate reference-input UTxO holds the certificate root — the SHA-256 MPF root of all anchored certificates, updated periodically by the coalition via MPFS.
 
 ```mermaid
 graph TD
@@ -116,23 +116,21 @@ Validator checks:
   5. New root computed correctly
 ```
 
-### Certificate Root Promotion Transaction
+### Certificate Root Update Transaction
 
-Submitted by the coalition after Hydra fan-out. Makes the fanned-out certificate-store UTxO the active certificate root.
+Submitted by the coalition periodically. Updates the certificate root with the latest MPF root from MPFS batching.
 
 ```
-Inputs:  provisional certificate-store UTxO (from fan-out)
-Outputs: certificate-root UTxO (at the reference-input address)
+Inputs:  current certificate root UTxO + coalition fee UTxO
+Outputs: new certificate root UTxO (updated MPF root)
 
 Validator checks:
-  1. Input is at the certificate-store script address
-  2. Output is at the certificate-root reference-input address
-  3. MPF root is preserved (input datum → output datum)
-  4. Transaction signed by the coalition (day-one)
-     Future: K-of-N shop signatures required
+  1. Input is the current certificate root UTxO
+  2. Output at the same address with updated MPF root
+  3. Transaction signed by the coalition
 ```
 
-The previous certificate root remains active until promotion completes — settlement transactions reference whichever root is current. No gap in service.
+The previous certificate root remains active until the update tx confirms — no gap in service. The frequency of updates is an operational choice trading L1 fees against confirmation latency.
 
 ## UTXO Contention
 
@@ -146,20 +144,20 @@ graph LR
     MPFS -->|batched tx| UTXO[Root UTXO]
 ```
 
-## L2 State (Hydra Head)
+## Off-Chain State (MPFS)
 
-The Hydra head maintains the certificate-store UTxO — a single UTxO at a script address whose datum is the SHA-256 MPF root. The head runs the same Plutus validator as L1 (isomorphic). Topup transactions inside the head consume and reproduce this UTxO with an updated root.
+The full certificate MPF is managed off-chain by MPFS. Reificators submit topup intents; MPFS validates them (card registered, Jubjub key matches shop), chains MPF inserts into batches, and periodically updates the certificate root on L1.
 
 ```mermaid
 graph TD
-    subgraph "Hydra Head (L2)"
-        CS["Certificate-Store UTxO<br/>mpfRoot: SHA-256 MPF root<br/>epoch: daily counter"]
-        CD["Coalition Datum (reference input)<br/>registered shops + cards"]
+    subgraph "Off-chain (MPFS)"
+        CM["Certificate MPF<br/>SHA-256 MPF root<br/>updated per batch"]
+        CD["Coalition Datum (read from L1)<br/>registered shops + cards"]
     end
     subgraph "L1"
         CR["Certificate Root UTxO<br/>(reference input for settlements)"]
     end
-    CS -->|fan-out + promotion| CR
+    CM -->|periodic root update tx| CR
 ```
 
-The head processes topups sequentially (one per snapshot). This is sufficient for expected volume (hundreds/day). If throughput becomes an issue, the MPF can be sharded across multiple UTxOs.
+MPFS handles the same contention problem for certificate batching as it does for L1 settlements — reificators submit intents, MPFS sequences them. The certificate MPF and the L1 trie root are independent UTxOs with zero cross-contention.

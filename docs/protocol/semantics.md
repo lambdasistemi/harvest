@@ -31,7 +31,7 @@ Precise definitions for every term in the protocol. Each definition is self-cont
 ## Actors
 
 **Coalition**
-:   The entity that creates the on-chain state, manufactures cards, registers shops, and operates the Hydra head for certificate anchoring. Minimal authority — cannot touch user funds or alter spend state. The only destructive action (removing a shop) requires multi-signature from other shops. As the sole Hydra participant, the coalition signs every snapshot but cannot forge certificates (it lacks shop Jubjub keys).
+:   The entity that creates the on-chain state, manufactures cards, registers shops, and operates MPFS for certificate anchoring. Minimal authority — cannot touch user funds or alter spend state. The only destructive action (removing a shop) requires multi-signature from other shops. The coalition signs certificate batches but cannot forge certificates (it lacks shop Jubjub keys).
 
 **Shop**
 :   A business in the coalition. Holds a master key (never on a device) for reverting pending entries. Receives cards from the coalition. Inserts a card into the reificator to activate it. Spare cards kept in a safe.
@@ -40,7 +40,7 @@ Precise definitions for every term in the protocol. Each definition is self-cont
 :   A PIN-protected smart card with a secure element. Holds two key pairs: Jubjub EdDSA (signs cap certificates, verified in ZK circuit) + Ed25519 (signs Cardano transactions and reification certificates, verified by Plutus validator). The card is the shop's complete identity. Distributed by the coalition, registered on-chain as a (jubjub_pk, ed25519_pk) pair under a shop.
 
 **Reificator**
-:   A stateless commodity hardware device at a cashing point. Has no keys of its own — it is a dumb terminal with a screen, network interface, and card slot. Holds only a Cardano payment key + UTXO for fees. All signing is delegated to the inserted card. Without a card, the reificator is inert. Interchangeable — a shop's card works in any compatible reificator. Connects to the Hydra node via WebSocket to submit topup transactions.
+:   A stateless commodity hardware device at a cashing point. Has no keys of its own — it is a dumb terminal with a screen, network interface, and card slot. Holds only a Cardano payment key + UTXO for fees. All signing is delegated to the inserted card. Without a card, the reificator is inert. Interchangeable — a shop's card works in any compatible reificator. Submits topup intents and L1 transaction requests to MPFS.
 
 **Casher**
 :   The human operator at the cashing point. Sees the reified amount, applies discounts, sets topup amounts. No cryptographic role — interacts only through the reificator's screen.
@@ -49,31 +49,31 @@ Precise definitions for every term in the protocol. Each definition is self-cont
 :   A customer with a phone. Holds `user_secret`, Ed25519 keypair (`sk_c`, `pk_c`), cap certificates, reification certificates, and spend randomness. Generates ZK proofs. Fully anonymous — no registration, no account, no wallet.
 
 **Data provider**
-:   An untrusted service that serves Merkle proofs from the off-chain trie data (spend trie, pending trie, and certificate MPF). Verified against the on-chain trie root and certificate root respectively. Anyone can run one. Paid per query by reificators.
+:   An untrusted service that serves Merkle proofs from the off-chain trie data (spend trie, pending trie, and certificate MPF). All are SHA-256 MPF, verified against the on-chain roots. Anyone can run one. Paid per query by reificators.
 
 ## Operations
 
 **Topup**
-:   The casher awards loyalty points to a user. Two things happen: (1) the card signs a new cap certificate (Jubjub EdDSA) with a higher cap and gives it to the user's phone, and (2) the reificator submits a Hydra transaction that anchors the certificate in the certificate-store MPF. This is the high-frequency, low-value event. **Requires the card to be inserted** — the reificator alone cannot issue certificates or sign transactions.
+:   The casher awards loyalty points to a user. Two things happen: (1) the card signs a new cap certificate (Jubjub EdDSA) with a higher cap and gives it to the user's phone, and (2) the reificator submits a topup intent to MPFS, which validates and batches the certificate anchor into the certificate MPF. This is the high-frequency, low-value event. **Requires the card to be inserted** — the reificator alone cannot issue certificates or sign intents.
 
     ```mermaid
     sequenceDiagram
         participant C as Casher
         participant R as Reificator + Card
         participant P as Phone
-        participant H as Hydra Head
+        participant MPFS as MPFS
         C->>R: set reward amount
         R->>R: card signs cap certificate (Jubjub EdDSA)
         R->>P: cap certificate
-        R->>R: card signs topup tx (Ed25519)
-        R->>H: topup tx via WebSocket
-        H->>H: certificate-store validator: MPF insert
-        H->>R: SnapshotConfirmed
-        R->>P: snapshot confirmation
-        Note over P: stores certificate + confirmation
+        R->>R: card signs topup intent (Ed25519)
+        R->>MPFS: topup intent
+        MPFS->>MPFS: validate + batch MPF insert
+        MPFS->>R: coalition batch receipt (signed)
+        R->>P: batch receipt
+        Note over P: stores certificate + receipt
     ```
 
-    The cap certificate is spendable on L1 only after the Hydra epoch fans out and the certificate root is promoted.
+    The cap certificate is spendable on L1 once the batch is included in the next certificate root update.
 
 **Settlement**
 :   The reificator (with card inserted) submits a user's ZK proof on-chain. The card's Ed25519 key signs the transaction. The spend trie counter goes up. A pending entry is created in the pending trie. Happens asynchronously — the user is at home.
@@ -141,33 +141,23 @@ Precise definitions for every term in the protocol. Each definition is self-cont
 
 ## Certificate Anchoring
 
-**Certificate-store**
-:   A single UTxO maintained inside the Hydra head at a script address. Its datum contains the SHA-256 Merkle Patricia Forestry (MPF) root of all anchored certificates and a daily epoch counter. The validator allows spending only with a valid MPF insert proof, a registered card's Ed25519 signature, and a matching issuer Jubjub key.
-
-    ```
-    CertificateStoreDatum
-      { mpfRoot :: ByteString    -- SHA-256 MPF root (32 bytes)
-      , epoch   :: Integer        -- daily epoch counter
-      }
-    ```
+**Certificate MPF**
+:   A SHA-256 Merkle Patricia Forestry tree managed off-chain by MPFS. Contains all anchored certificates, keyed by `(issuer_jubjub_pk, user_id)` with value `certificate_id`. Updated by MPFS as it processes topup intent batches. The root is periodically posted to L1 as a reference input.
 
 **Certificate ID**
 :   `certificate_id = Poseidon(user_id, cap)` — the key used to anchor a certificate in the MPF. This value is computed by the ZK circuit and exposed as public input index 8. The binding between `certificate_id` and the actual cap is enforced by the circuit, not by the on-chain validator (Poseidon is not available on-chain).
 
 **Certificate root**
-:   The SHA-256 MPF root stored in a reference-input UTxO on L1. Settlement transactions include an MPF membership proof for `certificate_id` against this root. The root is updated via the promotion transaction after each Hydra epoch's fan-out.
+:   The SHA-256 MPF root stored in a reference-input UTxO on L1. Settlement transactions include an MPF membership proof for `certificate_id` against this root. Updated periodically by the coalition via a certificate root update transaction.
 
-**Certificate root promotion**
-:   An L1 transaction that makes a fanned-out certificate-store UTxO the active certificate root. The previous root remains active until promotion completes — no gap in service. Day-one: coalition is the sole promoter. Future: K-of-N shop counter-signing.
+**Certificate root update**
+:   An L1 transaction that updates the certificate root UTxO with a new MPF root. Submitted by the coalition after processing one or more batches. The previous root remains active until the update tx confirms — no gap in service.
 
 **IPFS changeset**
-:   A JSON document published to IPFS at the end of each Hydra epoch. Contains all topup entries from that epoch, each independently verifiable against L1: `(issuerJubjubPk, userId, certificateId, cardEd25519Pk, snapshotNumber)`. Replaying all entries from `previousRoot` must produce `newRoot`.
+:   A JSON document published to IPFS for each batch (or group of batches). Contains all topup entries, each independently verifiable against L1: `(issuerJubjubPk, userId, certificateId, cardEd25519Pk, batchNumber)`. Replaying all entries from `previousRoot` must produce `newRoot`.
 
-**Hydra snapshot confirmation**
-:   An irrevocable proof that a topup transaction was included in a confirmed Hydra snapshot. All participants (the coalition) multi-signed the snapshot. Contestation can only present a *newer* snapshot, never invalidate a confirmed one. The reificator gives this to the user's phone as proof of anchoring.
-
-**Hydra epoch**
-:   One daily cycle of the Hydra head: open → topups → close → contestation → fan-out → promotion. The epoch counter in the certificate-store datum increments with each cycle.
+**Coalition batch receipt**
+:   The coalition's signature over `(batchNumber, previousRoot, newRoot, entries)`. Given to the user's phone via the reificator as proof that the coalition committed to including their topup. If the L1 root doesn't reflect a signed batch, the user has cryptographic evidence of fraud. Enforcement is off-chain (business/legal).
 
 ## State Transitions
 

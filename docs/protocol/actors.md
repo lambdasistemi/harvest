@@ -6,17 +6,17 @@
 graph TD
     CO[Coalition] -->|manufactures| CD[Card]
     CO -->|registers| S[Shop]
-    CO -->|operates| HH[Hydra Head]
+    CO -->|operates| MPFS[MPFS]
     S -->|inserts card into| R[Reificator]
     CD -->|signs certificates + transactions| R
     R -->|settles proofs| L1[On-Chain]
-    R -->|submits topup txs via WebSocket| HH
+    R -->|submits topup intents| MPFS
     R -->|queries| DP[Data Provider]
-    HH -->|fan-out → certificate root| L1
+    MPFS -->|updates certificate root| L1
     U[User] -->|sends proofs to| R
     U -->|redeems at| R
     C[Casher] -->|operates| R
-    S -->|audits IPFS changeset| HH
+    S -->|audits IPFS changeset| MPFS
     DP -->|serves Merkle proofs from| L1
 
     style CO fill:#445,stroke:#889
@@ -27,12 +27,12 @@ graph TD
     style C fill:#453,stroke:#896
     style DP fill:#435,stroke:#879
     style L1 fill:#554,stroke:#998
-    style HH fill:#446,stroke:#88a
+    style MPFS fill:#446,stroke:#88a
 ```
 
 ## Coalition
 
-Creates the protocol infrastructure and operates the Hydra head. Minimal ongoing authority over user funds.
+Creates the protocol infrastructure and operates MPFS. Minimal ongoing authority over user funds.
 
 | Power | Constraint |
 |-------|-----------|
@@ -40,26 +40,19 @@ Creates the protocol infrastructure and operates the Hydra head. Minimal ongoing
 | Manufacture cards (burn key pairs into secure element) | Cards distributed to shops |
 | Register shops and cards on-chain | On request |
 | Remove shops | Requires multi-sig from other shops |
-| Operate Hydra head (open, close, fan-out) | Coalition-only participants |
-| Publish IPFS changeset after each epoch | Auditable by all shops |
-| Promote certificate root on L1 | After fan-out + shop audit |
+| Operate MPFS (certificate batching + L1 settlements) | Auditable by all shops |
+| Publish IPFS changeset after each batch | Auditable by all shops |
+| Update certificate root on L1 | Periodically, auditable |
 
 The coalition **cannot**: alter spend state, access user data, forge certificates, submit transactions on behalf of shops, or unilaterally remove members.
 
-### Hydra Head Operator Role
+### Certificate Batching Role
 
-The coalition is the sole participant in the Hydra head. This is a deliberate design choice: unanimous consensus requires every participant to sign every snapshot. Adding N shops would mean N+1 parties must be online — a single unresponsive shop blocks all topups coalition-wide.
+The coalition operates MPFS, which collects topup intents from reificators, validates them (card registered, Jubjub key matches), chains MPF inserts into batches, and updates the certificate root on L1 periodically.
 
-The coalition operates a daily cycle:
+When a batch is committed, the coalition signs `(batchNumber, previousRoot, newRoot, entries)`. Each reificator receives the coalition's signature as a receipt for the user — cryptographic evidence that the coalition committed to including their topup.
 
-1. **Open** the head each morning (commit certificate-store UTxO + coalition datum snapshot)
-2. **Accept topup transactions** throughout the day (submitted by reificators via WebSocket)
-3. **Publish IPFS changeset** at end of day (all entries, independently verifiable)
-4. **Close** the head, wait for contestation period (12h)
-5. **Fan-out** the certificate-store UTxO to L1
-6. **Promote** the new certificate root on L1
-
-The coalition cannot forge certificates (it lacks any shop's Jubjub key) and cannot fabricate changeset entries (each entry references a registered card's Ed25519 key that signed the Hydra transaction). Shops audit the IPFS changeset and can refuse to counter-sign if anything is wrong.
+The coalition cannot forge certificates (it lacks any shop's Jubjub key) and cannot fabricate changeset entries (each entry requires a registered card's Ed25519 signature on the topup intent). Shops audit the IPFS changeset and raise disputes if anything is wrong.
 
 ## Shop
 
@@ -75,13 +68,13 @@ The shop receives cards from the coalition. One card is inserted into a reificat
 
 ### IPFS Changeset Audit
 
-After each Hydra epoch, the shop audits the IPFS changeset published by the coalition:
+Periodically, the shop audits the IPFS changeset published by the coalition:
 
 1. Fetches the changeset (CID broadcast by coalition)
 2. Verifies all entries reference registered keys on L1
 3. Verifies the MPF root transition is correct (replaying all inserts)
 4. Checks entries attributed to their shop match their own reificator logs
-5. If anything is wrong: refuses to counter-sign the certificate root promotion
+5. If anything is wrong: raises a dispute
 
 A single honest shop catches any forgery. The coalition cannot fabricate entries because it lacks any shop's Jubjub private key.
 
@@ -130,7 +123,7 @@ graph LR
     end
     subgraph "Capabilities (only with card inserted)"
         SLOT --> SETTLE[Settlement<br/>card signs tx]
-        SLOT --> TOPUP[Topup<br/>card signs certificate +<br/>Hydra tx via WebSocket]
+        SLOT --> TOPUP[Topup<br/>card signs certificate +<br/>intent to MPFS]
         SLOT --> REDEEM[Redemption<br/>card signs tx]
     end
 ```
@@ -143,13 +136,15 @@ graph LR
 | Identity keys | None — all signing delegated to the inserted card |
 | Payment key | Cardano payment key + UTXO (for transaction fees only) |
 | Interchangeable | A shop's card works in any compatible reificator |
-| Hydra connectivity | WebSocket to coalition's Hydra node (`ws://hydra-node:4001`) |
+| MPFS connectivity | Submits topup intents + L1 settlement/redemption intents |
 
-### Hydra Topup Submission
+### Topup Submission
 
-During a topup, the reificator builds a Hydra transaction (same Cardano tx format) that consumes the certificate-store UTxO inside the head. The card signs the transaction via its Ed25519 key. The reificator submits the tx to the Hydra node via WebSocket (`{"tag": "NewTx", "transaction": {...}}`), and receives a `SnapshotConfirmed` event as confirmation. The confirmed snapshot is irrevocable.
+During a topup, the reificator submits a topup intent to MPFS: `{issuerJubjubPk, userId, certificateId, cardEd25519Sig}`. The card signs the intent payload via its Ed25519 key. MPFS validates the intent (card registered, Jubjub key matches shop) and includes it in the next batch.
 
-If the Hydra node is unreachable, the topup is queued locally and retried. The customer receives the signed cap certificate immediately (the card's Jubjub key signs it regardless) but cannot spend it until the topup is anchored on L2 and fanned out to L1.
+The coalition returns a signed batch receipt. The reificator passes this to the user's phone alongside the cap certificate.
+
+If MPFS is unreachable, the topup intent is queued locally and retried. The customer receives the signed cap certificate immediately (the card's Jubjub key signs it regardless) but cannot spend it until the topup is anchored and the certificate root updated on L1.
 
 ## User
 
@@ -162,9 +157,9 @@ Anonymous. No registration, no identity beyond `Poseidon(user_secret)`.
 | Spend randomness (`r_old`, `r_new`) | Opens commitments |
 | Cap certificates (per shop) | Proves spending allowance |
 | Reification certificates (per spend) | Redeems at cashing points |
-| Hydra snapshot confirmations (per topup) | Proves certificate is anchored on L2 |
+| Coalition batch receipts (per topup) | Proves certificate is anchored |
 
-The user **never** interacts with the blockchain. The phone generates proofs, the reificator submits them. At topup time, the user receives both the cap certificate (signed by the card's Jubjub key) and a Hydra snapshot confirmation (proving the certificate is anchored). The certificate is not spendable until its corresponding topup has been fanned out to L1 and the certificate root promoted.
+The user **never** interacts with the blockchain. The phone generates proofs, the reificator submits them. At topup time, the user receives both the cap certificate (signed by the card's Jubjub key) and a coalition batch receipt (proving the certificate is anchored). The certificate is not spendable until the certificate root on L1 includes the batch.
 
 ## Key Ceremony
 

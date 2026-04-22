@@ -9,7 +9,8 @@ sequenceDiagram
     participant CO as Coalition
     participant L1 as On-Chain
     CO->>L1: create trie root UTXO (three empty tries)
-    Note over L1: spend trie: empty<br/>reificator trie: empty<br/>pending trie: empty
+    CO->>L1: create certificate root UTXO (empty MPF)
+    Note over L1: spend trie: empty<br/>reificator trie: empty<br/>pending trie: empty<br/>certificate root: empty MPF
 ```
 
 Anyone with the will to distribute reificators can create a coalition. The coalition's power is limited to manufacturing devices and registering shops.
@@ -50,24 +51,26 @@ sequenceDiagram
     participant C as Casher
     participant R as Reificator + Card
     participant P as Phone
-    participant H as Hydra Head
+    participant MPFS as MPFS
 
     C->>R: "give this customer 5 euros of rewards"
     R->>R: card signs cap certificate (Jubjub EdDSA): Poseidon(user_id, cap=5)
     R->>P: cap certificate
-    Note over R: Build topup tx (same Cardano tx format)
-    R->>R: card signs topup tx (Ed25519)
-    R->>H: submit topup tx via WebSocket
-    H->>H: certificate-store validator checks:<br/>1. MPF insert proof valid<br/>2. card Ed25519 key registered<br/>3. issuer Jubjub key matches card's shop
-    H->>H: snapshot confirmed (irrevocable)
-    H->>R: SnapshotConfirmed
-    R->>P: snapshot confirmation
-    Note over P: stores certificate + snapshot confirmation
+    Note over R: Build topup intent
+    R->>R: card signs intent (Ed25519)
+    R->>MPFS: topup intent {issuerJubjubPk, userId, certificateId, cardEd25519Sig}
+    MPFS->>MPFS: validate: card registered,<br/>Jubjub key matches shop
+    MPFS->>MPFS: chain MPF insert into current batch
+    MPFS->>R: coalition batch receipt (signed)
+    R->>P: batch receipt
+    Note over P: stores certificate + batch receipt
 ```
 
-The topup has two parts: (1) the cap certificate (Jubjub-signed, given to the user's phone) and (2) the certificate anchoring (Hydra transaction inserting `certificate_id` into the certificate-store MPF). Both happen atomically from the casher's perspective. The card must be inserted — the reificator alone cannot produce certificates or sign transactions.
+The topup has two parts: (1) the cap certificate (Jubjub-signed, given to the user's phone) and (2) the certificate anchoring (MPFS validates and batches the insert into the certificate MPF). Both happen atomically from the casher's perspective. The card must be inserted — the reificator alone cannot produce certificates or sign intents.
 
-If the Hydra node is unreachable, the cap certificate is still issued (the card signs it locally) but the anchoring is queued for retry. The certificate is not spendable until anchored and fanned out to L1.
+The cap certificate is spendable on L1 once the batch is included in the next certificate root update.
+
+If MPFS is unreachable, the cap certificate is still issued (the card signs it locally) but the anchoring is queued for retry.
 
 ## Phase 5: First Spend (Settlement)
 
@@ -84,11 +87,13 @@ sequenceDiagram
     Note over P: user chooses:<br/>d=3, acceptor=card B, certificate from card A (cap=5)
     R->>P: card B authenticates (Ed25519 challenge)<br/>+ proposed TxOutRef to consume
     P->>P: verify card B is registered in coalition datum
-    P->>P: generate ZK proof<br/>binds: d=3, pk_c, issuer_A_jubjub_pk<br/>proves: 0 + 3 ≤ 5
+    P->>P: generate ZK proof<br/>binds: d=3, pk_c, issuer_A_jubjub_pk, certificate_id<br/>proves: 0 + 3 ≤ 5
     P->>P: Ed25519 sign signed_data =<br/>(TxOutRef ‖ card_B_ed25519_pk ‖ d=3)
     P->>R: ZK proof + pk_c + signature + signed_data
     R->>DP: Merkle proof for user_id in spend trie?
     DP->>R: non-membership proof (first spend)
+    R->>DP: MPF membership proof for certificate_id in certificate root?
+    DP->>R: membership proof
     R->>M: settlement request (card B signs tx via Ed25519)
     M->>L1: settlement tx
     Note over L1: validator checks:<br/>1. Ed25519.verify(pk_c, signed_data, sig)<br/>2. signed_data.TxOutRef ∈ tx.inputs<br/>3. signed_data.d == redeemer.d<br/>4. customer_pubkey matches proof's pk_c inputs<br/>5. ZK proof valid (includes certificate_id at index 8)<br/>6. non-membership → s_old=0 accepted<br/>7. signed_data.acceptor_pk is a registered card<br/>8. tx is signed by acceptor_pk<br/>9. certificate_id has valid MPF membership proof<br/>   against certificate root (reference input)
@@ -111,14 +116,16 @@ sequenceDiagram
     participant M as MPFS
     participant L1 as On-Chain
 
-    P->>P: generate ZK proof<br/>d=2, issuer_A_jubjub_pk<br/>proves: 3 + 2 ≤ 5
+    P->>P: generate ZK proof<br/>d=2, issuer_A_jubjub_pk, certificate_id<br/>proves: 3 + 2 ≤ 5
     P->>P: Ed25519 sign (TxOutRef ‖ card_C_ed25519_pk ‖ d=2)
     P->>R: ZK proof + signature + signed_data
     R->>DP: Merkle proof for (issuer_A, user_id)?
     DP->>R: membership proof (commit(3))
+    R->>DP: MPF proof for certificate_id in certificate root?
+    DP->>R: membership proof
     R->>M: settlement request (card C signs tx)
     M->>L1: settlement tx
-    Note over L1: validator checks:<br/>1. ZK proof valid<br/>2. membership proof matches commit(3)<br/>3. acceptor_pk (card C) is registered<br/>4. tx signed by card C<br/>5. issuer_A_jubjub_pk registered
+    Note over L1: validator checks:<br/>1. ZK proof valid<br/>2. membership proof matches commit(3)<br/>3. acceptor_pk (card C) is registered<br/>4. tx signed by card C<br/>5. issuer_A_jubjub_pk registered<br/>6. certificate_id in certificate root
     L1->>L1: spend trie: update (issuer_A, user_id) → commit(5)
     L1->>L1: pending trie: insert new entry
     R->>P: reification certificate (card_C_ed25519_sig)
@@ -161,20 +168,19 @@ sequenceDiagram
     participant C as Casher
     participant R as Reificator + Card B
     participant P as Phone
-    participant H as Hydra Head
+    participant MPFS as MPFS
 
     C->>R: "give 8 euros of rewards"
     R->>R: card B signs cap certificate (Jubjub EdDSA): Poseidon(user_id, cap=8)
     R->>P: new cap certificate from card B
-    R->>R: card B signs topup tx (Ed25519)
-    R->>H: submit topup tx via WebSocket
-    H->>H: certificate-store validator: MPF insert
-    H->>R: SnapshotConfirmed
-    R->>P: snapshot confirmation
-    Note over P: now holds:<br/>• cap=5 from card A (fully spent)<br/>• cap=8 from card B (0 spent, anchored on L2)<br/>• 1 reification certificate from card C
+    R->>R: card B signs topup intent (Ed25519)
+    R->>MPFS: topup intent
+    MPFS->>R: coalition batch receipt
+    R->>P: batch receipt
+    Note over P: now holds:<br/>• cap=5 from card A (fully spent)<br/>• cap=8 from card B (0 spent, anchored in batch)<br/>• 1 reification certificate from card C
 ```
 
-The customer walks away with new earning potential at shop B. The cap certificate is spendable once the current Hydra epoch fans out and the certificate root is promoted on L1.
+The customer walks away with new earning potential at shop B. The cap certificate is spendable once the batch is included in the next certificate root update on L1.
 
 ## Phase 9: Multi-Certificate Spend (Future)
 
@@ -191,42 +197,36 @@ graph LR
 
 One proof, multiple certificates, atomic update. The circuit verifies N issuer signatures and proves each partial spend stays within its cap.
 
-## Hydra Daily Cycle
+## Certificate Batching Cycle
 
-The certificate anchoring layer runs on a daily cycle operated by the coalition. This cycle is orthogonal to the user-facing phases above — it runs continuously in the background.
+The certificate anchoring runs continuously, operated by the coalition via MPFS.
 
-### Epoch Open
+### Continuous Batching
+
+MPFS collects topup intents from reificators continuously. Intents are validated immediately (card registered, Jubjub key matches shop) and chained into the certificate MPF. Batches are committed at a configurable interval (e.g. every few seconds or every N intents).
+
+### Certificate Root Update (L1)
 
 ```mermaid
 sequenceDiagram
-    participant CO as Coalition
+    participant MPFS as MPFS
     participant L1 as L1
-    participant H as Hydra Head
 
-    CO->>L1: read coalition datum (registered shops, cards)
-    CO->>L1: read certificate-store UTxO (or create empty one)
-    CO->>H: init head (coalition as sole participant)
-    CO->>H: commit certificate-store UTxO
-    CO->>H: commit coalition datum snapshot (reference input)
-    Note over H: Head open — accepting topup transactions
+    MPFS->>L1: certificate root update tx
+    Note over L1: Input: current certificate root UTxO<br/>Output: new certificate root UTxO (updated MPF root)<br/>Coalition signs
 ```
 
-If this is the first cycle ever, the coalition creates the certificate-store UTxO on L1 with an empty MPF root, then commits it.
-
-### Topups Throughout the Day
-
-Reificators submit topup transactions to the head via WebSocket (see Phase 4 and Phase 8). Each topup consumes and reproduces the certificate-store UTxO with an updated MPF root. The head processes these sequentially — one per snapshot.
+The coalition updates the certificate root on L1 periodically (the frequency trades L1 fees against confirmation latency). The previous root remains active until the update tx confirms — no gap in service.
 
 ### Changeset Publication
 
 ```mermaid
 sequenceDiagram
-    participant CO as Coalition
+    participant MPFS as MPFS
     participant IPFS as IPFS
 
-    CO->>CO: collect all topup entries from this epoch
-    CO->>IPFS: publish changeset JSON
-    Note over IPFS: {headId, epoch, previousRoot,<br/>newRoot, entries: [{issuerJubjubPk,<br/>userId, certificateId, cardEd25519Pk,<br/>snapshotNumber}, ...]}
+    MPFS->>IPFS: publish changeset JSON
+    Note over IPFS: {batchNumber, previousRoot,<br/>newRoot, entries: [{issuerJubjubPk,<br/>userId, certificateId, cardEd25519Pk}, ...]}
 ```
 
 Each entry is independently verifiable against L1: the keys must be registered, and replaying all inserts from `previousRoot` must produce `newRoot`.
@@ -244,59 +244,24 @@ sequenceDiagram
     S->>S: replay inserts: previousRoot → newRoot
     S->>S: cross-check entries for own shop against reificator logs
     alt Everything valid
-        S->>S: approve (ready to counter-sign promotion)
+        S->>S: approve
     else Discrepancy found
-        S->>S: refuse to counter-sign
+        S->>S: raise dispute
     end
 ```
 
-### Close, Contestation, Fan-out
-
-```mermaid
-sequenceDiagram
-    participant CO as Coalition
-    participant H as Hydra Head
-    participant L1 as L1
-
-    CO->>H: close head
-    H->>L1: post latest confirmed snapshot
-    Note over L1: contestation period (12h)
-    Note over L1: anyone can contest with a newer snapshot
-    CO->>L1: fan-out
-    Note over L1: certificate-store UTxO materializes on L1<br/>at the script address
-```
-
-The contestation period is 12 hours minimum (Cardano mainnet safe zone ≈ 10h, rounded up). After contestation, fan-out distributes the head's final UTxO set to L1.
-
-### Certificate Root Promotion
-
-```mermaid
-sequenceDiagram
-    participant CO as Coalition
-    participant L1 as L1
-
-    CO->>L1: promotion tx
-    Note over L1: Input: provisional certificate-store UTxO (from fan-out)<br/>Output: certificate-root UTxO (reference input)<br/>Previous root remains active until promotion completes
-```
-
-The promotion transaction makes the fanned-out certificate root the active one for settlements. The previous certificate root remains active until promotion completes — no gap in service.
-
-**Day-one**: the coalition is the sole promoter (no on-chain shop counter-signing). Shops audit off-chain and raise disputes out-of-band. On-chain K-of-N shop counter-signing is a future hardening step.
-
-### Revocation During an Epoch
+### Revocation
 
 ```mermaid
 sequenceDiagram
     participant S as Shop
     participant L1 as L1
-    participant CO as Coalition
-    participant H as Hydra Head
+    participant MPFS as MPFS
 
     S->>L1: remove compromised card from coalition datum
-    CO->>H: close head (coalition datum is stale)
-    CO->>L1: fan-out + promote current root
-    CO->>H: open new head with updated coalition datum
-    Note over H: revoked card's Ed25519 key no longer registered<br/>new topups from revoked card rejected
+    MPFS->>MPFS: next validation checks coalition datum
+    MPFS->>MPFS: topup intents from revoked card rejected
+    Note over MPFS: certificates anchored before revocation<br/>remain valid (legitimately signed)
 ```
 
-When a card's Jubjub key is compromised, the shop revokes it on L1. The head must be closed and reopened with the updated coalition datum — the simplest approach for a rare event. Certificates anchored before revocation remain valid (they were legitimately signed). The damage window equals the time between compromise and revocation.
+When a card's Jubjub key is compromised, the shop revokes it on L1. MPFS reads the coalition datum for validation — intents from the revoked card's Ed25519 key are rejected immediately. No service interruption. The damage window equals the time between compromise and revocation.
